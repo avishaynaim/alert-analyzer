@@ -148,27 +148,38 @@
       <button id="btnCloseError">✕</button>
     </div>
 
-    <!-- Console Script Modal (CORS workaround) -->
+    <!-- Sync Modal -->
     <div id="corsModal" class="modal-backdrop hidden">
       <div class="modal">
         <div class="modal-header">
-          <h3>🔒 סנכרון דרך קונסול הדפדפן</h3>
+          <h3>📡 סנכרון נתונים מפיקוד העורף</h3>
           <button class="modal-close" id="btnCloseModal">✕</button>
         </div>
         <div class="modal-body">
-          <p>האתר חסום ל-CORS — צריך להריץ את הסקריפט <strong>מתוך</strong> אתר פיקוד העורף:</p>
-          <ol class="modal-steps">
-            <li>פתח לשונית חדשה ועבור לאתר:<br>
-              <a href="https://www.oref.org.il/heb/alerts-history" target="_blank" class="oref-link">
-                www.oref.org.il/heb/alerts-history
-              </a>
-            </li>
-            <li>לחץ <kbd>F12</kbd> לפתיחת DevTools → לשונית <kbd>Console</kbd></li>
-            <li>הדבק את הקוד הבא והקש Enter:</li>
-          </ol>
-          <div class="code-block" id="consoleScript"></div>
-          <button class="btn btn-primary" id="btnCopyScript">📋 העתק קוד</button>
-          <p class="text-muted" style="margin-top:10px">לאחר הרצת הסקריפט חזור לכאן ורענן את הדף.</p>
+
+          <!-- Step 1: copy script -->
+          <div class="modal-step-block" id="stepBlock1">
+            <div class="step-badge">שלב 1</div>
+            <p>פתח לשונית חדשה → עבור לאתר פיקוד העורף → פתח Console (F12) → הדבק והרץ:</p>
+            <a href="https://www.oref.org.il/heb/alerts-history" target="_blank" class="oref-link-btn">
+              🔗 פתח אתר פיקוד העורף
+            </a>
+            <div class="code-block" id="consoleScript"></div>
+            <button class="btn btn-primary" id="btnCopyScript">📋 העתק קוד</button>
+            <p class="text-muted">הסקריפט יעתיק את כל הנתונים ללוח העריכה שלך — <strong>לא שולח כלום לאינטרנט</strong>.</p>
+          </div>
+
+          <!-- Step 2: paste JSON -->
+          <div class="modal-step-block">
+            <div class="step-badge">שלב 2</div>
+            <p>לאחר הרצת הסקריפט — חזור לכאן והדבק את הנתונים:</p>
+            <textarea id="pasteArea" class="paste-area" placeholder="הדבק כאן את הנתונים שהועתקו (JSON)..."></textarea>
+            <div class="modal-actions">
+              <button class="btn btn-primary" id="btnLoadPasted">✓ טען נתונים</button>
+              <span id="pasteStatus" class="paste-status"></span>
+            </div>
+          </div>
+
         </div>
       </div>
     </div>

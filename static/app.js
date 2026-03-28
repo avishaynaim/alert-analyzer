@@ -37,28 +37,25 @@ function showError(msg) {
   setTimeout(() => $("errorBanner").classList.add("hidden"), 12000);
 }
 
-/* ===== Console script for CORS workaround ===== */
-const BACKEND_URL = window.location.origin;
-const CONSOLE_SCRIPT = `(async () => {
-  try {
-    console.log('[OREF Sync] Fetching alerts...');
-    const r = await fetch('/WarningMessages/History/AlertsHistory.json');
-    if (!r.ok) throw new Error('OREF returned ' + r.status);
-    const data = await r.json();
-    console.log('[OREF Sync] Got', data.length, 'alerts. Sending to backend...');
-    const res = await fetch('${BACKEND_URL}/api/sync', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(data)
+/* ===== Console script — copies data to clipboard only (no cross-origin POST) ===== */
+const CONSOLE_SCRIPT =
+`fetch('/WarningMessages/History/AlertsHistory.json')
+  .then(r => r.json())
+  .then(data => {
+    const json = JSON.stringify(data);
+    navigator.clipboard.writeText(json).then(() => {
+      alert('✅ ' + data.length + ' התרעות הועתקו!\\nחזור לאפליקציה והדבק בתיבה.');
+    }).catch(() => {
+      // clipboard API blocked — show in textarea instead
+      const ta = document.createElement('textarea');
+      ta.value = json;
+      ta.style = 'position:fixed;top:10px;left:10px;width:90vw;height:80vh;z-index:99999;font-size:10px';
+      document.body.appendChild(ta);
+      ta.select();
+      alert('לא ניתן להעתיק אוטומטית.\\nסמן הכל (Ctrl+A) והעתק (Ctrl+C) מהתיבה שנפתחה.');
     });
-    const result = await res.json();
-    if (!result.ok) throw new Error(result.error);
-    alert('✅ סנכרון הושלם!\\n' + result.added + ' רשומות חדשות\\nסה"כ בבסיס: ' + result.total);
-  } catch(e) {
-    alert('❌ שגיאה: ' + e.message);
-    console.error('[OREF Sync] Error:', e);
-  }
-})();`;
+  })
+  .catch(e => alert('שגיאה: ' + e.message));`;
 
 function showCorsModal() {
   log('Showing CORS modal with console script');
@@ -501,7 +498,50 @@ async function init() {
     navigator.clipboard.writeText(CONSOLE_SCRIPT).then(() => {
       $("btnCopyScript").textContent = "✓ הועתק!";
       setTimeout(() => { $("btnCopyScript").textContent = "📋 העתק קוד"; }, 2500);
-    });
+    }).catch(() => showError("לא ניתן להעתיק — נסה ידנית"));
+  });
+
+  $("btnLoadPasted").addEventListener("click", async () => {
+    const raw = $("pasteArea").value.trim();
+    if (!raw) { $("pasteStatus").textContent = "אנא הדבק נתונים תחילה"; return; }
+
+    let arr;
+    try {
+      arr = JSON.parse(raw);
+      if (!Array.isArray(arr)) throw new Error("לא מערך JSON");
+    } catch(e) {
+      $("pasteStatus").textContent = "JSON לא תקין: " + e.message;
+      logErr("Paste parse error:", e);
+      return;
+    }
+
+    log("Pasted JSON:", arr.length, "records");
+    $("pasteStatus").textContent = `שולח ${arr.length.toLocaleString("he-IL")} רשומות...`;
+    $("btnLoadPasted").disabled = true;
+
+    try {
+      const res = await fetch("/api/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(arr),
+      });
+      const result = await res.json();
+      log("Paste sync result:", result);
+
+      if (!result.ok) throw new Error(result.error);
+
+      $("pasteStatus").textContent = `✓ ${result.added.toLocaleString("he-IL")} רשומות חדשות נוספו`;
+      $("pasteArea").value = "";
+      setTimeout(async () => {
+        hideCorsModal();
+        await loadAll();
+      }, 1500);
+    } catch(e) {
+      logErr("Paste sync failed:", e);
+      $("pasteStatus").textContent = "שגיאה: " + e.message;
+    } finally {
+      $("btnLoadPasted").disabled = false;
+    }
   });
 
   $("btnCloseError").addEventListener("click", () => $("errorBanner").classList.add("hidden"));
