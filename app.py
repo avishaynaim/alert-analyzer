@@ -243,7 +243,7 @@ def query_alerts(from_date=None, to_date=None, areas=None):
                hour, date_only::text
         FROM alerts {where}
         ORDER BY alert_date DESC
-        LIMIT 500000
+        LIMIT 1000
     """
     with get_conn() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
@@ -296,27 +296,106 @@ def static_files(filename):
     return send_from_directory("static", filename)
 
 
-@app.route("/api/alerts")
-def get_alerts():
+def build_where(from_date, to_date, areas):
+    conditions, params = [], []
+    if from_date:
+        conditions.append("date_only >= %s"); params.append(from_date)
+    if to_date:
+        conditions.append("date_only <= %s"); params.append(to_date)
+    if areas:
+        conditions.append("area = ANY(%s)"); params.append(areas)
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    return where, params
+
+
+def parse_preset(preset, from_date, to_date):
+    now = datetime.now()
+    if preset == "24h":
+        return (now - timedelta(hours=24)).strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d")
+    if preset == "day":
+        d = now.strftime("%Y-%m-%d"); return d, d
+    if preset == "week":
+        return (now - timedelta(days=7)).strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d")
+    return from_date, to_date
+
+
+@app.route("/api/analytics")
+def get_analytics():
+    """Returns pre-aggregated data — never raw rows. Fast and browser-safe."""
+    if not DATABASE_URL:
+        return jsonify({"error": "No database configured"}), 503
+
     from_date   = request.args.get("from_date")
     to_date     = request.args.get("to_date")
     preset      = request.args.get("preset")
     areas_param = request.args.get("areas")
 
-    now = datetime.now()
-    if preset == "24h":
-        from_date = (now - timedelta(hours=24)).strftime("%Y-%m-%d")
-        to_date   = now.strftime("%Y-%m-%d")
-    elif preset == "day":
-        from_date = to_date = now.strftime("%Y-%m-%d")
-    elif preset == "week":
-        from_date = (now - timedelta(days=7)).strftime("%Y-%m-%d")
-        to_date   = now.strftime("%Y-%m-%d")
-
+    from_date, to_date = parse_preset(preset, from_date, to_date)
     areas = [a.strip() for a in areas_param.split(",")] if areas_param else None
+    where, params = build_where(from_date, to_date, areas)
 
+    with get_conn() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+
+            # Total count
+            cur.execute(f"SELECT COUNT(*) as cnt FROM alerts {where}", params)
+            total = cur.fetchone()["cnt"]
+
+            # Hour distribution (0–23)
+            cur.execute(f"""
+                SELECT hour, COUNT(*) as cnt
+                FROM alerts {where}
+                  {"AND" if where else "WHERE"} hour IS NOT NULL
+                GROUP BY hour ORDER BY hour
+            """, params)
+            hour_rows = cur.fetchall()
+            hour_buckets = [0] * 24
+            for r in hour_rows:
+                if 0 <= r["hour"] <= 23:
+                    hour_buckets[r["hour"]] = r["cnt"]
+
+            # Top 15 areas
+            cur.execute(f"""
+                SELECT area, COUNT(*) as cnt
+                FROM alerts {where}
+                  {"AND" if where else "WHERE"} area IS NOT NULL AND area != ''
+                GROUP BY area ORDER BY cnt DESC LIMIT 15
+            """, params)
+            top_areas = [{"area": r["area"], "count": r["cnt"]} for r in cur.fetchall()]
+
+            # Date range
+            cur.execute(f"""
+                SELECT MIN(date_only)::text as earliest, MAX(date_only)::text as latest
+                FROM alerts {where}
+            """, params)
+            dates = cur.fetchone()
+
+            # Peak hour
+            peak_hour = hour_buckets.index(max(hour_buckets)) if total else None
+
+    return jsonify({
+        "total":        total,
+        "peak_hour":    peak_hour,
+        "hour_buckets": hour_buckets,
+        "top_areas":    top_areas,
+        "earliest":     dates["earliest"],
+        "latest":       dates["latest"],
+    })
+
+
+@app.route("/api/alerts")
+def get_alerts():
+    # Keep for compatibility but cap at 1000 rows
     if not DATABASE_URL:
         return jsonify({"error": "No database configured"}), 503
+
+    from_date   = request.args.get("from_date")
+    to_date     = request.args.get("to_date")
+    preset      = request.args.get("preset")
+    areas_param = request.args.get("areas")
+
+    from_date, to_date = parse_preset(preset, from_date, to_date)
+    areas = [a.strip() for a in areas_param.split(",")] if areas_param else None
 
     return jsonify(query_alerts(from_date, to_date, areas))
 

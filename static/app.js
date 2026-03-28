@@ -1,35 +1,29 @@
 /* ===== Logger ===== */
-const log = (...args) => console.log('[Alert]', ...args);
-const logErr = (...args) => console.error('[Alert ERROR]', ...args);
-const logWarn = (...args) => console.warn('[Alert WARN]', ...args);
+const log    = (...a) => console.log('[Alert]', ...a);
+const logErr = (...a) => console.error('[Alert ERROR]', ...a);
+const logWarn= (...a) => console.warn('[Alert WARN]', ...a);
 
 /* ===== State ===== */
 const state = {
-  allAlerts: [],
-  filteredAlerts: [],
-  selectedAreas: new Set(),
-  allAreas: [],
   preset: "all",
   fromDate: null,
   toDate: null,
   globalStartDate: null,
+  selectedAreas: new Set(),
+  allAreas: [],
 };
 
-let hourChart = null;
+let hourChart  = null;
 let areasChart = null;
 
 const $ = id => document.getElementById(id);
 
-/* ===== Util ===== */
+/* ===== UI helpers ===== */
 function showLoading(v, msg = "טוען נתונים...") {
   $("loadingOverlay").classList.toggle("hidden", !v);
   $("loadingMsg").textContent = msg;
 }
-
-function showEmpty(v) {
-  $("emptyState").classList.toggle("hidden", !v);
-}
-
+function showEmpty(v) { $("emptyState").classList.toggle("hidden", !v); }
 function showError(msg) {
   logErr(msg);
   $("errorMsg").textContent = msg;
@@ -37,7 +31,35 @@ function showError(msg) {
   setTimeout(() => $("errorBanner").classList.add("hidden"), 12000);
 }
 
-/* ===== Console script — copies data to clipboard only (no cross-origin POST) ===== */
+/* ===== DB badge ===== */
+function updateDbBadge(total) {
+  const badge = $("dbBadge");
+  if (!total) {
+    badge.className = "badge badge-empty";
+    badge.textContent = "● בסיס נתונים ריק";
+    $("emptyDbBanner").classList.remove("hidden");
+  } else {
+    badge.className = "badge badge-live";
+    badge.textContent = `● ${total.toLocaleString("he-IL")} התרעות`;
+    $("emptyDbBanner").classList.add("hidden");
+  }
+}
+
+/* ===== Sync bar ===== */
+function showSyncBar(msg, pct = null) {
+  $("syncBar").classList.remove("hidden");
+  $("syncBarLabel").textContent = msg;
+  $("syncBarInner").style.width = pct !== null ? pct + "%" : "0%";
+  if (pct === null) $("syncBarInner").classList.add("indeterminate");
+  else              $("syncBarInner").classList.remove("indeterminate");
+}
+function hideSyncBar() {
+  setTimeout(() => $("syncBar").classList.add("hidden"), 2000);
+  $("syncBarInner").style.width = "100%";
+  $("syncBarInner").classList.remove("indeterminate");
+}
+
+/* ===== Sync flow ===== */
 const CONSOLE_SCRIPT =
 `fetch('/WarningMessages/History/AlertsHistory.json')
   .then(r => r.json())
@@ -46,168 +68,86 @@ const CONSOLE_SCRIPT =
     navigator.clipboard.writeText(json).then(() => {
       alert('✅ ' + data.length + ' התרעות הועתקו!\\nחזור לאפליקציה והדבק בתיבה.');
     }).catch(() => {
-      // clipboard API blocked — show in textarea instead
       const ta = document.createElement('textarea');
       ta.value = json;
       ta.style = 'position:fixed;top:10px;left:10px;width:90vw;height:80vh;z-index:99999;font-size:10px';
-      document.body.appendChild(ta);
-      ta.select();
-      alert('לא ניתן להעתיק אוטומטית.\\nסמן הכל (Ctrl+A) והעתק (Ctrl+C) מהתיבה שנפתחה.');
+      document.body.appendChild(ta); ta.select();
+      alert('סמן הכל (Ctrl+A) והעתק (Ctrl+C) מהתיבה שנפתחה.');
     });
   })
   .catch(e => alert('שגיאה: ' + e.message));`;
 
-function showCorsModal() {
-  log('Showing CORS modal with console script');
-  $("consoleScript").textContent = CONSOLE_SCRIPT;
-  $("corsModal").classList.remove("hidden");
-}
+function showCorsModal() { $("corsModal").classList.remove("hidden"); }
+function hideCorsModal()  { $("corsModal").classList.add("hidden"); }
 
-function hideCorsModal() {
-  $("corsModal").classList.add("hidden");
-}
-
-/* ===== DB Status Badge ===== */
-function updateDbBadge(stats) {
-  const badge = $("dbBadge");
-  if (!stats || !stats.total) {
-    badge.className = "badge badge-empty";
-    badge.textContent = "● בסיס נתונים ריק";
-    $("emptyDbBanner").classList.remove("hidden");
-    log('DB is empty');
-  } else {
-    badge.className = "badge badge-live";
-    badge.textContent = `● ${stats.total.toLocaleString("he-IL")} התרעות`;
-    $("emptyDbBanner").classList.add("hidden");
-    log(`DB has ${stats.total} records, range: ${stats.earliest} → ${stats.latest}`);
-    if (stats.last_sync) {
-      badge.title = `סנכרון אחרון: ${new Date(stats.last_sync.synced_at).toLocaleString("he-IL")}`;
-    }
-  }
-}
-
-/* ===== Sync progress bar ===== */
-function showSyncBar(msg, pct = null) {
-  log('Sync:', msg, pct !== null ? pct + '%' : '');
-  $("syncBar").classList.remove("hidden");
-  $("syncBarLabel").textContent = msg;
-  $("syncBarInner").style.width = pct !== null ? pct + "%" : "0%";
-  if (pct === null) $("syncBarInner").classList.add("indeterminate");
-  else $("syncBarInner").classList.remove("indeterminate");
-}
-
-function hideSyncBar() {
-  setTimeout(() => $("syncBar").classList.add("hidden"), 2000);
-  $("syncBarInner").style.width = "100%";
-  $("syncBarInner").classList.remove("indeterminate");
-}
-
-/* ===== Sync flow ===== */
 async function runSync() {
-  log('=== Sync started ===');
+  log('Sync triggered');
   const btns = [$("btnSync"), $("btnSyncBanner")].filter(Boolean);
-  btns.forEach(b => {
-    b.disabled = true;
-    const ic = b.querySelector(".sync-icon");
-    if (ic) ic.style.animation = "spin 0.7s linear infinite";
-  });
+  btns.forEach(b => { b.disabled = true; const ic = b.querySelector(".sync-icon"); if (ic) ic.style.animation = "spin 0.7s linear infinite"; });
 
   try {
-    // Step 1: try server-side fetch
-    showSyncBar("מנסה משיכה ישירה מהשרת...", 15);
-    log('Step 1: attempting server-side OREF fetch via POST /api/sync with empty body');
+    showSyncBar("מסנכרן מ-GitHub...", null);
+    const res  = await fetch("/api/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: "[]" });
+    const data = await res.json();
+    log('Sync result:', data);
 
-    const res1 = await fetch("/api/sync", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: "[]",
-    });
+    if (!data.ok) throw new Error(data.error || "Sync failed");
 
-    log('Server sync response status:', res1.status);
-    const data1 = await res1.json();
-    log('Server sync response:', data1);
-
-    if (data1.needs_browser_sync) {
-      // Step 2: CORS workaround — show console script modal
-      logWarn('Server geo-blocked. Showing CORS console-script modal.');
-      hideSyncBar();
-      showCorsModal();
-      return;
-    }
-
-    if (!data1.ok) throw new Error(data1.error || "Server sync failed");
-
-    showSyncBar(`✓ סנכרון הושלם — ${(data1.added || 0).toLocaleString("he-IL")} רשומות חדשות`, 100);
+    showSyncBar(`✓ ${(data.added || 0).toLocaleString("he-IL")} רשומות חדשות`, 100);
     hideSyncBar();
-    log('Sync complete. Reloading data...');
     await loadAll();
-
   } catch (e) {
     logErr('Sync failed:', e);
     hideSyncBar();
     showError("שגיאת סנכרון: " + e.message);
   } finally {
-    btns.forEach(b => {
-      b.disabled = false;
-      const ic = b.querySelector(".sync-icon");
-      if (ic) ic.style.animation = "";
-    });
+    btns.forEach(b => { b.disabled = false; const ic = b.querySelector(".sync-icon"); if (ic) ic.style.animation = ""; });
   }
 }
 
-/* ===== API ===== */
-async function fetchAlerts(from_date, to_date, areas) {
+/* ===== Build query params ===== */
+function buildParams() {
   const qs = new URLSearchParams();
+  const now = new Date();
 
-  const effectiveFrom = from_date && state.globalStartDate
-    ? (from_date > state.globalStartDate ? from_date : state.globalStartDate)
-    : (from_date || state.globalStartDate || null);
-
-  if (effectiveFrom) qs.set("from_date", effectiveFrom);
-  if (to_date) qs.set("to_date", to_date);
-  if (areas && areas.length) qs.set("areas", areas.join(","));
-
-  const url = `/api/alerts?${qs}`;
-  log('Fetching alerts:', url);
-
-  const res = await fetch(url);
-  log('Alerts response status:', res.status);
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `HTTP ${res.status}`);
+  if (state.preset === "24h") {
+    qs.set("from_date", new Date(now - 86400000).toISOString().slice(0,10));
+    qs.set("to_date",   now.toISOString().slice(0,10));
+  } else if (state.preset === "day") {
+    const d = now.toISOString().slice(0,10);
+    qs.set("from_date", d); qs.set("to_date", d);
+  } else if (state.preset === "week") {
+    qs.set("from_date", new Date(now - 7*86400000).toISOString().slice(0,10));
+    qs.set("to_date",   now.toISOString().slice(0,10));
+  } else if (state.preset === "custom") {
+    if (state.fromDate) qs.set("from_date", state.fromDate);
+    if (state.toDate)   qs.set("to_date",   state.toDate);
   }
+
+  // Global start date is a floor
+  if (state.globalStartDate) {
+    const cur = qs.get("from_date");
+    const floor = (!cur || state.globalStartDate > cur) ? state.globalStartDate : cur;
+    qs.set("from_date", floor);
+  }
+
+  if (state.selectedAreas.size) qs.set("areas", [...state.selectedAreas].join(","));
+
+  return qs;
+}
+
+/* ===== Fetch analytics (aggregated — never raw rows) ===== */
+async function fetchAnalytics() {
+  const url = `/api/analytics?${buildParams()}`;
+  log('Fetching analytics:', url);
+  const res = await fetch(url);
+  if (!res.ok) { const e = await res.json().catch(()=>{}); throw new Error((e||{}).error || `HTTP ${res.status}`); }
   const data = await res.json();
-  log(`Got ${data.length} alerts`);
+  log('Analytics:', data.total, 'alerts, peak hour:', data.peak_hour);
   return data;
 }
 
-/* ===== Date range helper ===== */
-function getDateRange() {
-  const now = new Date();
-  if (state.preset === "24h") {
-    return [new Date(now - 86400000).toISOString().slice(0,10), now.toISOString().slice(0,10)];
-  }
-  if (state.preset === "day") {
-    const d = now.toISOString().slice(0,10);
-    return [d, d];
-  }
-  if (state.preset === "week") {
-    return [new Date(now - 7 * 86400000).toISOString().slice(0,10), now.toISOString().slice(0,10)];
-  }
-  if (state.preset === "custom") {
-    return [state.fromDate, state.toDate];
-  }
-  return [null, null];
-}
-
-/* ===== Hour buckets ===== */
-function computeHourBuckets(alerts) {
-  const b = new Array(24).fill(0);
-  alerts.forEach(a => { if (a.hour >= 0 && a.hour <= 23) b[a.hour]++; });
-  return b;
-}
-
+/* ===== Bar colors ===== */
 function getBarColors(buckets) {
   const max = Math.max(...buckets, 1);
   return buckets.map(v => {
@@ -218,124 +158,72 @@ function getBarColors(buckets) {
   });
 }
 
-/* ===== Charts ===== */
-function renderHourChart(alerts) {
-  const buckets = computeHourBuckets(alerts);
-  const labels = Array.from({ length: 24 }, (_, i) => String(i).padStart(2,"0") + ":00");
+/* ===== Render hour chart ===== */
+function renderHourChart(buckets) {
+  const labels = Array.from({length:24}, (_,i) => String(i).padStart(2,"0")+":00");
   const colors = getBarColors(buckets);
-  log('Hour chart — peak hour:', buckets.indexOf(Math.max(...buckets)) + ':00 with', Math.max(...buckets), 'alerts');
 
   if (hourChart) {
     hourChart.data.datasets[0].data = buckets;
     hourChart.data.datasets[0].backgroundColor = colors;
-    hourChart.update("active");
-    return;
+    hourChart.update("active"); return;
   }
 
-  const ctx = $("hourChart").getContext("2d");
-  hourChart = new Chart(ctx, {
+  hourChart = new Chart($("hourChart").getContext("2d"), {
     type: "bar",
-    data: {
-      labels,
-      datasets: [{
-        label: "התרעות",
-        data: buckets,
-        backgroundColor: colors,
-        borderRadius: 5,
-        borderSkipped: false,
-      }]
-    },
+    data: { labels, datasets: [{ label: "התרעות", data: buckets, backgroundColor: colors, borderRadius: 5, borderSkipped: false }] },
     options: {
-      responsive: true,
-      maintainAspectRatio: false,
+      responsive: true, maintainAspectRatio: false,
       animation: { duration: 600, easing: "easeOutQuart" },
       plugins: {
         legend: { display: false },
         tooltip: {
           rtl: true,
-          backgroundColor: "rgba(14,17,23,0.95)",
-          borderColor: "#252d3d",
-          borderWidth: 1,
-          titleColor: "#e2e8f0",
-          bodyColor: "#94a3b8",
-          padding: 12,
-          cornerRadius: 8,
-          callbacks: {
-            title: items => `שעה ${items[0].label}`,
-            label: item => ` ${item.raw.toLocaleString("he-IL")} התרעות`,
-          }
+          backgroundColor: "rgba(14,17,23,0.95)", borderColor: "#252d3d", borderWidth: 1,
+          titleColor: "#e2e8f0", bodyColor: "#94a3b8", padding: 12, cornerRadius: 8,
+          callbacks: { title: i => `שעה ${i[0].label}`, label: i => ` ${i.raw.toLocaleString("he-IL")} התרעות` }
         }
       },
       scales: {
-        x: {
-          grid: { color: "rgba(37,45,61,0.5)" },
-          ticks: { color: "#475569", font: { size: 11 } },
-        },
-        y: {
-          grid: { color: "rgba(37,45,61,0.5)" },
-          ticks: { color: "#475569", precision: 0 },
-          beginAtZero: true,
-        }
+        x: { grid: { color: "rgba(37,45,61,0.5)" }, ticks: { color: "#475569", font: { size: 11 } } },
+        y: { grid: { color: "rgba(37,45,61,0.5)" }, ticks: { color: "#475569", precision: 0 }, beginAtZero: true }
       }
     }
   });
 }
 
-function renderAreasChart(alerts) {
-  const counts = {};
-  alerts.forEach(a => {
-    const k = (a.data || "לא ידוע").trim();
-    counts[k] = (counts[k] || 0) + 1;
-  });
-
-  const sorted = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,15);
-  const labels = sorted.map(e => e[0]);
-  const values = sorted.map(e => e[1]);
-  log('Top area:', labels[0], '—', values[0], 'alerts');
-
+/* ===== Render areas chart ===== */
+function renderAreasChart(topAreas) {
+  const labels = topAreas.map(a => a.area);
+  const values = topAreas.map(a => a.count);
   const n = Math.max(values.length - 1, 1);
-  const barColors = values.map((_, i) => {
+  const colors = values.map((_, i) => {
     const t = i / n;
-    if (t < 0.5) {
-      const u = t * 2;
-      return `rgba(${Math.round(59+u*40)},${Math.round(130-u*28)},${Math.round(246-u*5)},0.85)`;
-    }
-    const u = (t-0.5)*2;
+    if (t < 0.5) { const u=t*2; return `rgba(${Math.round(59+u*40)},${Math.round(130-u*28)},246,0.85)`; }
+    const u=(t-0.5)*2;
     return `rgba(${Math.round(99+u*140)},${Math.round(102-u*34)},${Math.round(241-u*173)},0.85)`;
   });
 
   if (areasChart) {
     areasChart.data.labels = labels;
     areasChart.data.datasets[0].data = values;
-    areasChart.data.datasets[0].backgroundColor = barColors;
-    areasChart.update("active");
-    return;
+    areasChart.data.datasets[0].backgroundColor = colors;
+    areasChart.update("active"); return;
   }
 
-  const ctx = $("areasChart").getContext("2d");
-  areasChart = new Chart(ctx, {
+  areasChart = new Chart($("areasChart").getContext("2d"), {
     type: "bar",
-    data: {
-      labels,
-      datasets: [{ label: "התרעות", data: values, backgroundColor: barColors, borderRadius: 5, borderSkipped: false }]
-    },
+    data: { labels, datasets: [{ label: "התרעות", data: values, backgroundColor: colors, borderRadius: 5, borderSkipped: false }] },
     options: {
-      indexAxis: "y",
-      responsive: true,
-      maintainAspectRatio: false,
+      indexAxis: "y", responsive: true, maintainAspectRatio: false,
       animation: { duration: 600, easing: "easeOutQuart" },
       plugins: {
         legend: { display: false },
         tooltip: {
           rtl: true,
-          backgroundColor: "rgba(14,17,23,0.95)",
-          borderColor: "#252d3d",
-          borderWidth: 1,
-          titleColor: "#e2e8f0",
-          bodyColor: "#94a3b8",
-          padding: 12,
-          cornerRadius: 8,
-          callbacks: { label: item => ` ${item.raw.toLocaleString("he-IL")} התרעות` }
+          backgroundColor: "rgba(14,17,23,0.95)", borderColor: "#252d3d", borderWidth: 1,
+          titleColor: "#e2e8f0", bodyColor: "#94a3b8", padding: 12, cornerRadius: 8,
+          callbacks: { label: i => ` ${i.raw.toLocaleString("he-IL")} התרעות` }
         }
       },
       scales: {
@@ -346,85 +234,60 @@ function renderAreasChart(alerts) {
   });
 }
 
-/* ===== Stats ===== */
-function updateStats(alerts) {
-  $("statTotal").textContent = alerts.length.toLocaleString("he-IL");
-  if (!alerts.length) {
-    ["statPeakHour","statTopArea","statDateRange"].forEach(id => $(id).textContent = "—");
-    return;
-  }
-
-  const buckets = computeHourBuckets(alerts);
-  const peak = buckets.indexOf(Math.max(...buckets));
-  $("statPeakHour").textContent = `${String(peak).padStart(2,"0")}:00`;
-
-  const areaCounts = {};
-  alerts.forEach(a => { const k=(a.data||"?").trim(); areaCounts[k]=(areaCounts[k]||0)+1; });
-  const top = Object.entries(areaCounts).sort((a,b)=>b[1]-a[1])[0];
-  $("statTopArea").textContent = top ? top[0] : "—";
-
-  const dates = alerts.map(a=>a.date).filter(Boolean).sort();
-  if (dates.length) {
-    const f=dates[0], t=dates[dates.length-1];
-    $("statDateRange").textContent = f===t ? f : `${f} – ${t}`;
-  }
+/* ===== Stats cards ===== */
+function updateStats(data) {
+  $("statTotal").textContent    = (data.total || 0).toLocaleString("he-IL");
+  $("statPeakHour").textContent = data.peak_hour !== null ? String(data.peak_hour).padStart(2,"0") + ":00" : "—";
+  $("statTopArea").textContent  = data.top_areas?.[0]?.area || "—";
+  const f = data.earliest?.slice(0,10), t = data.latest?.slice(0,10);
+  $("statDateRange").textContent = f ? (f === t ? f : `${f} – ${t}`) : "—";
 }
 
-/* ===== Full render ===== */
+/* ===== Full render cycle ===== */
 async function render() {
   showLoading(true);
   try {
-    const [from, to] = getDateRange();
-    const areas = state.selectedAreas.size ? [...state.selectedAreas] : null;
-    log(`Rendering — preset:${state.preset} from:${from} to:${to} areas:${areas}`);
+    const data = await fetchAnalytics();
+    const hasData = data.total > 0;
 
-    const alerts = await fetchAlerts(from, to, areas);
-    state.allAlerts = alerts;
-
-    const hasData = alerts.length > 0;
+    updateStats(data);
+    updateDbBadge(data.total);
     showEmpty(!hasData);
-    $("hourChart").closest(".chart-section").style.display = hasData ? "" : "none";
+
+    $("hourChart").closest(".chart-section").style.display  = hasData ? "" : "none";
     $("areasChart").closest(".chart-section").style.display = hasData ? "" : "none";
 
-    updateStats(alerts);
     if (hasData) {
-      renderHourChart(alerts);
-      renderAreasChart(alerts);
+      renderHourChart(data.hour_buckets);
+      renderAreasChart(data.top_areas);
     }
-    log(`Render complete — ${alerts.length} alerts displayed`);
+    log(`Render complete — ${data.total} alerts`);
   } catch(e) {
-    logErr('render() failed:', e);
-    showError("שגיאה בטעינת נתונים: " + e.message);
+    logErr('Render failed:', e);
+    showError("שגיאה: " + e.message);
   } finally {
     showLoading(false);
   }
 }
 
-/* ===== Areas ===== */
+/* ===== Areas dropdown ===== */
 async function loadAreas() {
-  log('Loading areas list...');
   try {
     const res = await fetch("/api/areas");
     state.allAreas = res.ok ? await res.json() : [];
     log(`Loaded ${state.allAreas.length} areas`);
-  } catch(e) {
-    logWarn('Failed to load areas:', e.message);
-    state.allAreas = [];
-  }
+  } catch { state.allAreas = []; }
 }
 
 function renderAreaDropdown(filter = "") {
-  const dropdown = $("areaDropdown");
-  const lower = filter.toLowerCase();
-  const items = state.allAreas.filter(a => a.toLowerCase().includes(lower)).slice(0, 80);
-  if (!items.length) { dropdown.style.display = "none"; return; }
-  dropdown.innerHTML = items.map(area => {
+  const dd = $("areaDropdown");
+  const items = state.allAreas.filter(a => a.toLowerCase().includes(filter.toLowerCase())).slice(0,80);
+  if (!items.length) { dd.style.display = "none"; return; }
+  dd.innerHTML = items.map(area => {
     const sel = state.selectedAreas.has(area);
-    return `<div class="area-option${sel?" selected":""}" data-area="${area}">
-      <input type="checkbox"${sel?" checked":""} tabindex="-1" readonly />${area}
-    </div>`;
+    return `<div class="area-option${sel?" selected":""}" data-area="${area}"><input type="checkbox"${sel?" checked":""} tabindex="-1" readonly />${area}</div>`;
   }).join("");
-  dropdown.style.display = "block";
+  dd.style.display = "block";
 }
 
 function renderSelectedTags() {
@@ -433,33 +296,23 @@ function renderSelectedTags() {
     `<span class="tag">${area}<button class="tag-remove" data-remove="${area}">✕</button></span>`
   ).join("");
   c.querySelectorAll(".tag-remove").forEach(btn => {
-    btn.addEventListener("click", () => {
-      state.selectedAreas.delete(btn.dataset.remove);
-      renderSelectedTags();
-      render();
-    });
+    btn.addEventListener("click", () => { state.selectedAreas.delete(btn.dataset.remove); renderSelectedTags(); render(); });
   });
 }
 
-/* ===== Load everything ===== */
+/* ===== Load status + areas then render ===== */
 async function loadAll() {
-  log('Loading status + areas...');
-  const [statusData] = await Promise.all([
-    fetch("/api/status").then(r => {
-      log('Status response:', r.status);
-      return r.json();
-    }).catch(e => { logErr('Status fetch failed:', e); return {}; }),
+  const [status] = await Promise.all([
+    fetch("/api/status").then(r => r.json()).catch(() => ({})),
     loadAreas(),
   ]);
-  log('Status data:', statusData);
-  updateDbBadge(statusData.db);
+  log('Status:', status);
   await render();
 }
 
 /* ===== Init ===== */
 async function init() {
-  log('=== App initializing ===');
-  log('Backend:', BACKEND_URL);
+  log('=== App init ===');
 
   await loadAll();
 
@@ -470,21 +323,18 @@ async function init() {
       btn.classList.add("active");
       state.preset = btn.dataset.preset;
       $("customDateGroup").style.display = state.preset === "custom" ? "flex" : "none";
-      log('Preset changed to:', state.preset);
       render();
     });
   });
 
   $("btnApplyDates").addEventListener("click", () => {
     state.fromDate = $("fromDate").value || null;
-    state.toDate = $("toDate").value || null;
-    log('Custom dates:', state.fromDate, '→', state.toDate);
+    state.toDate   = $("toDate").value   || null;
     render();
   });
 
   $("btnSetStartDate").addEventListener("click", () => {
     state.globalStartDate = $("globalStartDate").value || null;
-    log('Global start date set to:', state.globalStartDate);
     render();
   });
 
@@ -495,49 +345,28 @@ async function init() {
   $("corsModal").addEventListener("click", e => { if (e.target === $("corsModal")) hideCorsModal(); });
 
   $("btnCopyScript").addEventListener("click", () => {
-    navigator.clipboard.writeText(CONSOLE_SCRIPT).then(() => {
-      $("btnCopyScript").textContent = "✓ הועתק!";
-      setTimeout(() => { $("btnCopyScript").textContent = "📋 העתק קוד"; }, 2500);
-    }).catch(() => showError("לא ניתן להעתיק — נסה ידנית"));
+    navigator.clipboard.writeText(CONSOLE_SCRIPT)
+      .then(() => { $("btnCopyScript").textContent = "✓ הועתק!"; setTimeout(() => $("btnCopyScript").textContent = "📋 העתק קוד", 2500); })
+      .catch(() => showError("לא ניתן להעתיק"));
   });
 
   $("btnLoadPasted").addEventListener("click", async () => {
     const raw = $("pasteArea").value.trim();
-    if (!raw) { $("pasteStatus").textContent = "אנא הדבק נתונים תחילה"; return; }
-
+    if (!raw) { $("pasteStatus").textContent = "אנא הדבק נתונים"; return; }
     let arr;
-    try {
-      arr = JSON.parse(raw);
-      if (!Array.isArray(arr)) throw new Error("לא מערך JSON");
-    } catch(e) {
-      $("pasteStatus").textContent = "JSON לא תקין: " + e.message;
-      logErr("Paste parse error:", e);
-      return;
-    }
+    try { arr = JSON.parse(raw); if (!Array.isArray(arr)) throw new Error("לא מערך"); }
+    catch(e) { $("pasteStatus").textContent = "JSON לא תקין: " + e.message; return; }
 
-    log("Pasted JSON:", arr.length, "records");
     $("pasteStatus").textContent = `שולח ${arr.length.toLocaleString("he-IL")} רשומות...`;
     $("btnLoadPasted").disabled = true;
-
     try {
-      const res = await fetch("/api/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(arr),
-      });
+      const res = await fetch("/api/sync", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(arr) });
       const result = await res.json();
-      log("Paste sync result:", result);
-
       if (!result.ok) throw new Error(result.error);
-
-      $("pasteStatus").textContent = `✓ ${result.added.toLocaleString("he-IL")} רשומות חדשות נוספו`;
+      $("pasteStatus").textContent = `✓ ${result.added.toLocaleString("he-IL")} רשומות חדשות`;
       $("pasteArea").value = "";
-      setTimeout(async () => {
-        hideCorsModal();
-        await loadAll();
-      }, 1500);
+      setTimeout(async () => { hideCorsModal(); await loadAll(); }, 1500);
     } catch(e) {
-      logErr("Paste sync failed:", e);
       $("pasteStatus").textContent = "שגיאה: " + e.message;
     } finally {
       $("btnLoadPasted").disabled = false;
@@ -546,21 +375,15 @@ async function init() {
 
   $("btnCloseError").addEventListener("click", () => $("errorBanner").classList.add("hidden"));
 
-  // Area search
   const areaSearch = $("areaSearch");
-  areaSearch.addEventListener("input", () => renderAreaDropdown(areaSearch.value));
-  areaSearch.addEventListener("focus", () => renderAreaDropdown(areaSearch.value));
-  document.addEventListener("click", e => {
-    if (!e.target.closest(".multiselect-wrapper")) $("areaDropdown").style.display = "none";
-  });
+  areaSearch.addEventListener("input",  () => renderAreaDropdown(areaSearch.value));
+  areaSearch.addEventListener("focus",  () => renderAreaDropdown(areaSearch.value));
+  document.addEventListener("click", e => { if (!e.target.closest(".multiselect-wrapper")) $("areaDropdown").style.display = "none"; });
   $("areaDropdown").addEventListener("click", e => {
-    const opt = e.target.closest(".area-option");
-    if (!opt) return;
+    const opt = e.target.closest(".area-option"); if (!opt) return;
     const area = opt.dataset.area;
     state.selectedAreas.has(area) ? state.selectedAreas.delete(area) : state.selectedAreas.add(area);
-    renderAreaDropdown(areaSearch.value);
-    renderSelectedTags();
-    render();
+    renderAreaDropdown(areaSearch.value); renderSelectedTags(); render();
   });
 
   log('=== App ready ===');
