@@ -354,12 +354,12 @@ def get_analytics():
                 if 0 <= r["hour"] <= 23:
                     hour_buckets[r["hour"]] = r["cnt"]
 
-            # Top 15 areas
+            # All areas ranked by count
             cur.execute(f"""
                 SELECT area, COUNT(*) as cnt
                 FROM alerts {where}
                   {"AND" if where else "WHERE"} area IS NOT NULL AND area != ''
-                GROUP BY area ORDER BY cnt DESC LIMIT 15
+                GROUP BY area ORDER BY cnt DESC
             """, params)
             top_areas = [{"area": r["area"], "count": r["cnt"]} for r in cur.fetchall()]
 

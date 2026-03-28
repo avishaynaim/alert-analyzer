@@ -442,6 +442,16 @@ main {
   letter-spacing: -0.01em;
 }
 
+.chart-hint {
+  font-size: 0.73rem;
+  color: var(--text-muted);
+  background: rgba(59,130,246,0.08);
+  border: 1px solid rgba(59,130,246,0.2);
+  border-radius: 20px;
+  padding: 3px 12px;
+  white-space: nowrap;
+}
+
 .chart-legend {
   display: flex;
   align-items: center;

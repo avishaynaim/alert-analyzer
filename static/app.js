@@ -193,37 +193,68 @@ function renderHourChart(buckets) {
 }
 
 /* ===== Render areas chart ===== */
-function renderAreasChart(topAreas) {
-  const labels = topAreas.map(a => a.area);
-  const values = topAreas.map(a => a.count);
-  const n = Math.max(values.length - 1, 1);
-  const colors = values.map((_, i) => {
+let _currentTopAreas = [];
+
+function getAreaColors(topAreas) {
+  const n = Math.max(topAreas.length - 1, 1);
+  return topAreas.map((a, i) => {
+    if (state.selectedAreas.has(a.area)) return "rgba(250,204,21,0.95)"; // gold highlight
     const t = i / n;
     if (t < 0.5) { const u=t*2; return `rgba(${Math.round(59+u*40)},${Math.round(130-u*28)},246,0.85)`; }
     const u=(t-0.5)*2;
     return `rgba(${Math.round(99+u*140)},${Math.round(102-u*34)},${Math.round(241-u*173)},0.85)`;
   });
+}
+
+function handleAreaClick(elements) {
+  if (!elements.length) return;
+  const area = _currentTopAreas[elements[0].index]?.area;
+  if (!area) return;
+  if (state.selectedAreas.has(area) && state.selectedAreas.size === 1) {
+    state.selectedAreas.clear();
+  } else {
+    state.selectedAreas.clear();
+    state.selectedAreas.add(area);
+  }
+  renderSelectedTags();
+  render();
+}
+
+function renderAreasChart(topAreas) {
+  _currentTopAreas = topAreas;
+  const labels = topAreas.map(a => a.area);
+  const values = topAreas.map(a => a.count);
+  const colors = getAreaColors(topAreas);
+
+  // Dynamic height: 26px per bar, min 300px
+  const h = Math.max(300, topAreas.length * 26);
+  $("areasChartContainer").style.height = h + "px";
 
   if (areasChart) {
     areasChart.data.labels = labels;
     areasChart.data.datasets[0].data = values;
     areasChart.data.datasets[0].backgroundColor = colors;
-    areasChart.update("active"); return;
+    areasChart.update("none"); return;
   }
 
   areasChart = new Chart($("areasChart").getContext("2d"), {
     type: "bar",
-    data: { labels, datasets: [{ label: "התרעות", data: values, backgroundColor: colors, borderRadius: 5, borderSkipped: false }] },
+    data: { labels, datasets: [{ label: "התרעות", data: values, backgroundColor: colors, borderRadius: 4, borderSkipped: false }] },
     options: {
       indexAxis: "y", responsive: true, maintainAspectRatio: false,
       animation: { duration: 600, easing: "easeOutQuart" },
+      onClick: (_, elements) => handleAreaClick(elements),
+      onHover: (evt) => { evt.native.target.style.cursor = "pointer"; },
       plugins: {
         legend: { display: false },
         tooltip: {
           rtl: true,
           backgroundColor: "rgba(14,17,23,0.95)", borderColor: "#252d3d", borderWidth: 1,
           titleColor: "#e2e8f0", bodyColor: "#94a3b8", padding: 12, cornerRadius: 8,
-          callbacks: { label: i => ` ${i.raw.toLocaleString("he-IL")} התרעות` }
+          callbacks: {
+            title: i => i[0].label,
+            label: i => ` ${i.raw.toLocaleString("he-IL")} התרעות${state.selectedAreas.has(i.label) ? " ✓ נבחר" : " — לחץ לסנן"}`
+          }
         }
       },
       scales: {
