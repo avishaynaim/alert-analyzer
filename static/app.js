@@ -80,7 +80,7 @@ async function fetchOrefFromBrowser() {
 
 async function runSync() {
   const btns = [$("btnSync"), $("btnSyncBanner")].filter(Boolean);
-  btns.forEach(b => { b.disabled = true; b.querySelector?.(".sync-icon") && (b.querySelector(".sync-icon").style.animation = "spin 0.7s linear infinite"); });
+  btns.forEach(b => { b.disabled = true; const ic = b.querySelector(".sync-icon"); if (ic) ic.style.animation = "spin 0.7s linear infinite"; });
 
   try {
     showSyncBar("מנסה משיכה ישירה מהשרת...", 10);
@@ -113,16 +113,19 @@ async function runSync() {
     hideSyncBar();
     showError("שגיאת סנכרון: " + e.message);
   } finally {
-    btns.forEach(b => { b.disabled = false; if (b.querySelector?.(".sync-icon")) b.querySelector(".sync-icon").style.animation = ""; });
+    btns.forEach(b => { b.disabled = false; const ic = b.querySelector(".sync-icon"); if (ic) ic.style.animation = ""; });
   }
 }
 
 /* ===== API ===== */
 async function fetchAlerts(from_date, to_date, areas) {
   const qs = new URLSearchParams();
-  if (from_date) qs.set("from_date", from_date);
+  // globalStartDate is the floor — use whichever is later
+  const effectiveFrom = from_date && state.globalStartDate
+    ? (from_date > state.globalStartDate ? from_date : state.globalStartDate)
+    : (from_date || state.globalStartDate || null);
+  if (effectiveFrom) qs.set("from_date", effectiveFrom);
   if (to_date) qs.set("to_date", to_date);
-  if (state.globalStartDate) qs.set("from_date", state.globalStartDate);
   if (areas && areas.length) qs.set("areas", areas.join(","));
 
   const res = await fetch(`/api/alerts?${qs}`);

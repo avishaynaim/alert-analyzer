@@ -256,6 +256,11 @@ def index():
     return send_from_directory("static", "index.html")
 
 
+@app.route("/static/<path:filename>")
+def static_files(filename):
+    return send_from_directory("static", filename)
+
+
 @app.route("/api/alerts")
 def get_alerts():
     from_date = request.args.get("from_date")

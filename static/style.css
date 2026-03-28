@@ -151,6 +151,12 @@ header {
 }
 .btn:active { transform: translateY(0); }
 
+.btn.btn-secondary {
+  background: var(--surface2);
+  border-color: var(--border-bright);
+  color: var(--text-muted);
+}
+.btn.btn-secondary:hover { color: var(--text); background: var(--surface3); }
 .btn.btn-primary {
   background: var(--grad-primary);
   border-color: transparent;
