@@ -8,7 +8,6 @@ const state = {
   fromDate: null,
   toDate: null,
   globalStartDate: null,
-  usingUploadedData: false,
 };
 
 let hourChart = null;
@@ -17,100 +16,149 @@ let areasChart = null;
 const $ = id => document.getElementById(id);
 
 /* ===== Util ===== */
-function showLoading(v) { $("loadingOverlay").classList.toggle("hidden", !v); }
+function showLoading(v, msg = "טוען נתונים...") {
+  $("loadingOverlay").classList.toggle("hidden", !v);
+  $("loadingMsg").textContent = msg;
+}
 function showEmpty(v) { $("emptyState").classList.toggle("hidden", !v); }
-
 function showError(msg) {
   $("errorMsg").textContent = msg;
   $("errorBanner").classList.remove("hidden");
-  setTimeout(() => $("errorBanner").classList.add("hidden"), 8000);
+  setTimeout(() => $("errorBanner").classList.add("hidden"), 9000);
+}
+
+/* ===== DB Status Badge ===== */
+function updateDbBadge(stats) {
+  const badge = $("dbBadge");
+  if (!stats || !stats.total) {
+    badge.className = "badge badge-empty";
+    badge.textContent = "● בסיס נתונים ריק";
+    $("emptyDbBanner").classList.remove("hidden");
+  } else {
+    badge.className = "badge badge-live";
+    const fmt = n => n.toLocaleString("he-IL");
+    badge.textContent = `● ${fmt(stats.total)} התרעות בבסיס`;
+    $("emptyDbBanner").classList.add("hidden");
+    if (stats.last_sync) {
+      const d = new Date(stats.last_sync.synced_at);
+      badge.title = `סנכרון אחרון: ${d.toLocaleString("he-IL")}`;
+    }
+  }
+}
+
+/* ===== Sync progress bar ===== */
+function showSyncBar(msg, pct = null) {
+  $("syncBar").classList.remove("hidden");
+  $("syncBarLabel").textContent = msg;
+  $("syncBarInner").style.width = pct !== null ? pct + "%" : "0%";
+  if (pct === null) $("syncBarInner").classList.add("indeterminate");
+  else $("syncBarInner").classList.remove("indeterminate");
+}
+function hideSyncBar() {
+  setTimeout(() => $("syncBar").classList.add("hidden"), 1500);
+  $("syncBarInner").style.width = "100%";
+}
+
+/* ===== OREF Fetch from browser ===== */
+const OREF_URL = "https://www.oref.org.il/WarningMessages/History/AlertsHistory.json";
+const OREF_HEADERS = {
+  "Referer": "https://www.oref.org.il/heb/alerts-history",
+  "Accept": "application/json, text/plain, */*",
+  "X-Requested-With": "XMLHttpRequest",
+};
+
+async function fetchOrefFromBrowser() {
+  showSyncBar("מתחבר לשרתי פיקוד העורף...", null);
+  const resp = await fetch(OREF_URL, { headers: OREF_HEADERS, mode: "cors" });
+  if (!resp.ok) throw new Error(`OREF returned ${resp.status}`);
+  const text = await resp.text();
+  // Strip BOM if present
+  const clean = text.replace(/^\uFEFF/, "").trim();
+  if (!clean) throw new Error("Empty response from OREF");
+  return JSON.parse(clean);
+}
+
+async function runSync() {
+  const btns = [$("btnSync"), $("btnSyncBanner")].filter(Boolean);
+  btns.forEach(b => { b.disabled = true; b.querySelector?.(".sync-icon") && (b.querySelector(".sync-icon").style.animation = "spin 0.7s linear infinite"); });
+
+  try {
+    showSyncBar("מנסה משיכה ישירה מהשרת...", 10);
+
+    // 1. First try server-side fetch (works if server is in Israel)
+    let res = await fetch("/api/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: "[]" });
+    let data = await res.json();
+
+    if (data.needs_browser_sync) {
+      // 2. Fallback: fetch from browser and push to server
+      showSyncBar("שרת חסום — מושך דרך הדפדפן...", 25);
+      const alerts = await fetchOrefFromBrowser();
+      showSyncBar(`נמצאו ${alerts.length.toLocaleString("he-IL")} התרעות — שומר בבסיס...`, 65);
+
+      res = await fetch("/api/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(alerts),
+      });
+      data = await res.json();
+    }
+
+    if (!data.ok) throw new Error(data.error || "Sync failed");
+
+    showSyncBar(`✓ סנכרון הושלם — ${data.added?.toLocaleString("he-IL")} רשומות חדשות`, 100);
+    hideSyncBar();
+    await loadAll();
+
+  } catch (e) {
+    hideSyncBar();
+    showError("שגיאת סנכרון: " + e.message);
+  } finally {
+    btns.forEach(b => { b.disabled = false; if (b.querySelector?.(".sync-icon")) b.querySelector(".sync-icon").style.animation = ""; });
+  }
 }
 
 /* ===== API ===== */
-async function fetchAlerts(params = {}) {
-  showLoading(true);
-  try {
-    const qs = new URLSearchParams();
-    if (params.preset && params.preset !== "all") qs.set("preset", params.preset);
-    if (params.from_date) qs.set("from_date", params.from_date);
-    if (params.to_date) qs.set("to_date", params.to_date);
+async function fetchAlerts(from_date, to_date, areas) {
+  const qs = new URLSearchParams();
+  if (from_date) qs.set("from_date", from_date);
+  if (to_date) qs.set("to_date", to_date);
+  if (state.globalStartDate) qs.set("from_date", state.globalStartDate);
+  if (areas && areas.length) qs.set("areas", areas.join(","));
 
-    const res = await fetch(`/api/alerts${qs.toString() ? "?" + qs : ""}`);
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || `HTTP ${res.status}`);
-    }
-    return await res.json();
-  } catch (e) {
-    showError("שגיאה בטעינת נתונים: " + e.message);
-    return [];
-  } finally {
-    showLoading(false);
+  const res = await fetch(`/api/alerts?${qs}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${res.status}`);
   }
-}
-
-async function fetchAreas() {
-  try {
-    const res = await fetch("/api/areas");
-    return res.ok ? res.json() : [];
-  } catch { return []; }
-}
-
-async function postUploadData(arr) {
-  const res = await fetch("/api/upload", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(arr),
-  });
   return res.json();
 }
 
-async function deleteUploadData() {
-  await fetch("/api/upload", { method: "DELETE" });
-}
-
 /* ===== Filter logic ===== */
-function applyFilters() {
-  let alerts = [...state.allAlerts];
-
-  // Global start date
-  if (state.globalStartDate) {
-    alerts = alerts.filter(a => a.date && a.date >= state.globalStartDate);
-  }
-
-  // Time preset / custom range (client-side cut)
+function getDateRange() {
   const now = new Date();
-  let cutFrom = null, cutTo = null;
   if (state.preset === "24h") {
-    cutFrom = new Date(now - 24 * 3600 * 1000);
-  } else if (state.preset === "day") {
-    cutFrom = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  } else if (state.preset === "week") {
-    cutFrom = new Date(now - 7 * 24 * 3600 * 1000);
-  } else if (state.preset === "custom") {
-    if (state.fromDate) cutFrom = new Date(state.fromDate);
-    if (state.toDate) { cutTo = new Date(state.toDate); cutTo.setHours(23, 59, 59); }
+    return [
+      new Date(now - 86400000).toISOString().slice(0,10),
+      now.toISOString().slice(0,10),
+    ];
   }
-
-  if (cutFrom || cutTo) {
-    alerts = alerts.filter(a => {
-      if (!a.timestamp) return true;
-      const t = new Date(a.timestamp);
-      if (cutFrom && t < cutFrom) return false;
-      if (cutTo && t > cutTo) return false;
-      return true;
-    });
+  if (state.preset === "day") {
+    const d = now.toISOString().slice(0,10);
+    return [d, d];
   }
-
-  // Area filter
-  if (state.selectedAreas.size > 0) {
-    alerts = alerts.filter(a => state.selectedAreas.has(a.data));
+  if (state.preset === "week") {
+    return [
+      new Date(now - 7 * 86400000).toISOString().slice(0,10),
+      now.toISOString().slice(0,10),
+    ];
   }
-
-  state.filteredAlerts = alerts;
+  if (state.preset === "custom") {
+    return [state.fromDate, state.toDate];
+  }
+  return [state.globalStartDate || null, null];
 }
 
-/* ===== Hour buckets ===== */
+/* ===== Compute hour buckets ===== */
 function computeHourBuckets(alerts) {
   const b = new Array(24).fill(0);
   alerts.forEach(a => { if (a.hour >= 0 && a.hour <= 23) b[a.hour]++; });
@@ -121,22 +169,16 @@ function getBarColors(buckets) {
   const max = Math.max(...buckets, 1);
   return buckets.map(v => {
     const r = v / max;
-    if (r >= 0.66) return "rgba(239,68,68,0.88)";
-    if (r >= 0.33) return "rgba(245,158,11,0.88)";
-    return "rgba(59,130,246,0.8)";
+    if (r >= 0.66) return "rgba(239,68,68,0.9)";
+    if (r >= 0.33) return "rgba(245,158,11,0.9)";
+    return "rgba(59,130,246,0.82)";
   });
 }
 
 /* ===== Charts ===== */
-const chartDefaults = {
-  color: "#64748b",
-  borderColor: "#252d3d",
-  font: { family: "'Segoe UI', system-ui, sans-serif" },
-};
-
 function renderHourChart(alerts) {
   const buckets = computeHourBuckets(alerts);
-  const labels = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0") + ":00");
+  const labels = Array.from({ length: 24 }, (_, i) => String(i).padStart(2,"0") + ":00");
   const colors = getBarColors(buckets);
 
   if (hourChart) {
@@ -157,13 +199,12 @@ function renderHourChart(alerts) {
         backgroundColor: colors,
         borderRadius: 5,
         borderSkipped: false,
-        hoverBackgroundColor: colors.map(c => c.replace(/[\d.]+\)$/, "1)")),
       }]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      animation: { duration: 500, easing: "easeOutQuart" },
+      animation: { duration: 600, easing: "easeOutQuart" },
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -183,11 +224,11 @@ function renderHourChart(alerts) {
       },
       scales: {
         x: {
-          grid: { color: "rgba(37,45,61,0.5)", drawBorder: false },
+          grid: { color: "rgba(37,45,61,0.5)" },
           ticks: { color: "#475569", font: { size: 11 } },
         },
         y: {
-          grid: { color: "rgba(37,45,61,0.5)", drawBorder: false },
+          grid: { color: "rgba(37,45,61,0.5)" },
           ticks: { color: "#475569", precision: 0 },
           beginAtZero: true,
         }
@@ -203,21 +244,18 @@ function renderAreasChart(alerts) {
     counts[k] = (counts[k] || 0) + 1;
   });
 
-  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 15);
+  const sorted = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,15);
   const labels = sorted.map(e => e[0]);
   const values = sorted.map(e => e[1]);
-
-  // Build gradient colors from blue → red based on rank
+  const n = Math.max(values.length - 1, 1);
   const barColors = values.map((_, i) => {
-    const t = i / Math.max(values.length - 1, 1);
-    // blue → indigo → red
+    const t = i / n;
     if (t < 0.5) {
       const u = t * 2;
-      return `rgba(${Math.round(59 + u*(99-59))},${Math.round(130 + u*(102-130))},${Math.round(246 + u*(241-246))},0.85)`;
-    } else {
-      const u = (t - 0.5) * 2;
-      return `rgba(${Math.round(99 + u*(239-99))},${Math.round(102 + u*(68-102))},${Math.round(241 + u*(68-241))},0.85)`;
+      return `rgba(${Math.round(59+u*40)},${Math.round(130-u*28)},${Math.round(246-u*5)},0.85)`;
     }
+    const u = (t-0.5)*2;
+    return `rgba(${Math.round(99+u*140)},${Math.round(102-u*34)},${Math.round(241-u*173)},0.85)`;
   });
 
   if (areasChart) {
@@ -245,7 +283,7 @@ function renderAreasChart(alerts) {
       indexAxis: "y",
       responsive: true,
       maintainAspectRatio: false,
-      animation: { duration: 500, easing: "easeOutQuart" },
+      animation: { duration: 600, easing: "easeOutQuart" },
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -262,7 +300,7 @@ function renderAreasChart(alerts) {
       },
       scales: {
         x: {
-          grid: { color: "rgba(37,45,61,0.5)", drawBorder: false },
+          grid: { color: "rgba(37,45,61,0.5)" },
           ticks: { color: "#475569", precision: 0 },
           beginAtZero: true,
         },
@@ -278,9 +316,8 @@ function renderAreasChart(alerts) {
 /* ===== Stats ===== */
 function updateStats(alerts) {
   $("statTotal").textContent = alerts.length.toLocaleString("he-IL");
-
   if (!alerts.length) {
-    ["statPeakHour","statTopArea","statDateRange"].forEach(id => $( id).textContent = "—");
+    ["statPeakHour","statTopArea","statDateRange"].forEach(id => $(id).textContent = "—");
     return;
   }
 
@@ -289,42 +326,58 @@ function updateStats(alerts) {
   $("statPeakHour").textContent = `${String(peak).padStart(2,"0")}:00`;
 
   const areaCounts = {};
-  alerts.forEach(a => { const k = (a.data||"?").trim(); areaCounts[k] = (areaCounts[k]||0)+1; });
+  alerts.forEach(a => { const k=(a.data||"?").trim(); areaCounts[k]=(areaCounts[k]||0)+1; });
   const top = Object.entries(areaCounts).sort((a,b)=>b[1]-a[1])[0];
   $("statTopArea").textContent = top ? top[0] : "—";
 
   const dates = alerts.map(a=>a.date).filter(Boolean).sort();
   if (dates.length) {
-    const f = dates[0], t = dates[dates.length-1];
-    $("statDateRange").textContent = f === t ? f : `${f} – ${t}`;
+    const f=dates[0], t=dates[dates.length-1];
+    $("statDateRange").textContent = f===t ? f : `${f} – ${t}`;
   }
 }
 
 /* ===== Full render ===== */
-function render() {
-  applyFilters();
-  const alerts = state.filteredAlerts;
-  updateStats(alerts);
+async function render() {
+  showLoading(true);
+  try {
+    const [from, to] = getDateRange();
+    const areas = state.selectedAreas.size ? [...state.selectedAreas] : null;
+    const alerts = await fetchAlerts(from, to, areas);
 
-  const hasData = alerts.length > 0;
-  showEmpty(!hasData);
-  $("hourChart").closest(".chart-section").style.display = hasData ? "" : "none";
-  $("areasChart").closest(".chart-section").style.display = hasData ? "" : "none";
+    state.allAlerts = alerts;
+    state.filteredAlerts = alerts;
 
-  if (hasData) {
-    renderHourChart(alerts);
-    renderAreasChart(alerts);
+    const hasData = alerts.length > 0;
+    showEmpty(!hasData);
+    $("hourChart").closest(".chart-section").style.display = hasData ? "" : "none";
+    $("areasChart").closest(".chart-section").style.display = hasData ? "" : "none";
+
+    updateStats(alerts);
+    if (hasData) {
+      renderHourChart(alerts);
+      renderAreasChart(alerts);
+    }
+  } catch(e) {
+    showError("שגיאה בטעינת נתונים: " + e.message);
+  } finally {
+    showLoading(false);
   }
 }
 
 /* ===== Area dropdown ===== */
+async function loadAreas() {
+  try {
+    const res = await fetch("/api/areas");
+    state.allAreas = res.ok ? await res.json() : [];
+  } catch { state.allAreas = []; }
+}
+
 function renderAreaDropdown(filter = "") {
   const dropdown = $("areaDropdown");
   const lower = filter.toLowerCase();
-  const items = state.allAreas.filter(a => a.toLowerCase().includes(lower)).slice(0, 80);
-
+  const items = state.allAreas.filter(a=>a.toLowerCase().includes(lower)).slice(0,80);
   if (!items.length) { dropdown.style.display = "none"; return; }
-
   dropdown.innerHTML = items.map(area => {
     const sel = state.selectedAreas.has(area);
     return `<div class="area-option${sel?" selected":""}" data-area="${area}">
@@ -337,7 +390,7 @@ function renderAreaDropdown(filter = "") {
 function renderSelectedTags() {
   const c = $("selectedAreas");
   c.innerHTML = [...state.selectedAreas].map(area =>
-    `<span class="tag" data-tag="${area}">${area}<button class="tag-remove" data-remove="${area}" title="הסר">✕</button></span>`
+    `<span class="tag">${area}<button class="tag-remove" data-remove="${area}">✕</button></span>`
   ).join("");
   c.querySelectorAll(".tag-remove").forEach(btn => {
     btn.addEventListener("click", () => {
@@ -348,59 +401,27 @@ function renderSelectedTags() {
   });
 }
 
-/* ===== Data source badge ===== */
-function setDataSourceBadge(uploaded) {
-  const badge = $("dataSourceBadge");
-  badge.className = "badge " + (uploaded ? "badge-offline" : "badge-live");
-  badge.textContent = uploaded ? "● נתונים ידניים" : "● נתונים חיים";
-}
-
-/* ===== Upload handlers ===== */
-function handleJSON(raw) {
-  try {
-    const arr = JSON.parse(raw);
-    if (!Array.isArray(arr)) throw new Error("Expected JSON array");
-    return arr;
-  } catch (e) {
-    showError("JSON לא תקין: " + e.message);
-    return null;
-  }
-}
-
-async function loadUploadedData(arr) {
-  showLoading(true);
-  try {
-    const r = await postUploadData(arr);
-    if (r.error) throw new Error(r.error);
-    state.usingUploadedData = true;
-    setDataSourceBadge(true);
-    await loadData();
-  } catch (e) {
-    showError(e.message);
-  } finally {
-    showLoading(false);
-  }
-}
-
-/* ===== Load all data ===== */
-async function loadData() {
-  const data = await fetchAlerts({});
-  state.allAlerts = data;
-  state.allAreas = [...new Set(data.map(a=>(a.data||"").trim()).filter(Boolean))].sort();
-  render();
+/* ===== Load everything ===== */
+async function loadAll() {
+  const [statusRes, areasRes] = await Promise.all([
+    fetch("/api/status").then(r=>r.json()).catch(()=>({})),
+    loadAreas(),
+  ]);
+  updateDbBadge(statusRes.db);
+  await render();
 }
 
 /* ===== Init ===== */
 async function init() {
-  await loadData();
+  await loadAll();
 
   // Preset buttons
   document.querySelectorAll(".btn-filter").forEach(btn => {
     btn.addEventListener("click", () => {
-      document.querySelectorAll(".btn-filter").forEach(b => b.classList.remove("active"));
+      document.querySelectorAll(".btn-filter").forEach(b=>b.classList.remove("active"));
       btn.classList.add("active");
       state.preset = btn.dataset.preset;
-      $("customDateGroup").style.display = state.preset === "custom" ? "flex" : "none";
+      $("customDateGroup").style.display = state.preset==="custom" ? "flex" : "none";
       render();
     });
   });
@@ -413,57 +434,19 @@ async function init() {
 
   $("btnSetStartDate").addEventListener("click", () => {
     state.globalStartDate = $("globalStartDate").value || null;
-    state.usingUploadedData = false;
-    deleteUploadData();
-    setDataSourceBadge(false);
-    loadData();
+    render();
   });
 
-  $("btnRefresh").addEventListener("click", () => {
-    if (!state.usingUploadedData) loadData();
-    else render(); // just re-render uploaded data
-  });
-
-  // Upload panel toggle
-  $("btnUploadToggle").addEventListener("click", () => {
-    $("uploadPanel").classList.toggle("hidden");
-  });
-
-  // Paste / file load
-  $("btnPasteLoad").addEventListener("click", async () => {
-    const raw = $("pasteArea").value.trim();
-    if (!raw) { showError("אנא הדבק JSON תחילה"); return; }
-    const arr = handleJSON(raw);
-    if (arr) await loadUploadedData(arr);
-  });
-
-  $("btnClearUpload").addEventListener("click", async () => {
-    await deleteUploadData();
-    state.usingUploadedData = false;
-    setDataSourceBadge(false);
-    $("pasteArea").value = "";
-    $("uploadPanel").classList.add("hidden");
-    await loadData();
-  });
-
-  $("fileInput").addEventListener("change", async e => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const text = await file.text();
-    const arr = handleJSON(text);
-    if (arr) await loadUploadedData(arr);
-    e.target.value = "";
-  });
+  $("btnSync").addEventListener("click", runSync);
+  $("btnSyncBanner")?.addEventListener("click", runSync);
 
   // Area search
   const areaSearch = $("areaSearch");
   areaSearch.addEventListener("input", () => renderAreaDropdown(areaSearch.value));
   areaSearch.addEventListener("focus", () => renderAreaDropdown(areaSearch.value));
-
   document.addEventListener("click", e => {
     if (!e.target.closest(".multiselect-wrapper")) $("areaDropdown").style.display = "none";
   });
-
   $("areaDropdown").addEventListener("click", e => {
     const opt = e.target.closest(".area-option");
     if (!opt) return;

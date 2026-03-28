@@ -18,32 +18,31 @@
         </div>
       </div>
       <div class="header-actions">
-        <span id="dataSourceBadge" class="badge badge-live">● נתונים חיים</span>
-        <button class="btn btn-secondary" id="btnUploadToggle">📂 טען נתונים</button>
-        <button class="btn btn-secondary" id="btnRefresh">↻ רענן</button>
+        <div id="dbBadge" class="badge badge-dim">● טוען...</div>
+        <button class="btn btn-sync" id="btnSync" title="משוך נתונים חדשים מפיקוד העורף">
+          <span class="sync-icon">↻</span> סנכרן נתונים
+        </button>
       </div>
     </div>
   </header>
 
+  <!-- Sync progress bar -->
+  <div id="syncBar" class="sync-bar hidden">
+    <div class="sync-bar-inner" id="syncBarInner"></div>
+    <span id="syncBarLabel">מסנכרן...</span>
+  </div>
+
   <main>
-    <!-- Upload / Paste Panel -->
-    <section class="upload-panel hidden" id="uploadPanel">
-      <div class="upload-header">
-        <h3>טעינת נתונים ידנית</h3>
-        <p class="text-muted">הדבק JSON ממאגר ההתרעות של פיקוד העורף, או גרור קובץ JSON לכאן.</p>
+    <!-- DB Status Banner (shown when DB is empty) -->
+    <div id="emptyDbBanner" class="info-banner hidden">
+      <div class="info-banner-icon">📡</div>
+      <div>
+        <strong>הבסיס נתונים ריק</strong>
+        <p>לחץ על <strong>סנכרן נתונים</strong> כדי למשוך את כל ההיסטוריה של פיקוד העורף לתוך הבסיס נתונים.</p>
+        <p class="text-muted">הסנכרון מתבצע דרך הדפדפן שלך (נדרש חיבור ישראלי).</p>
       </div>
-      <div class="upload-body">
-        <textarea id="pasteArea" placeholder='[{"alertDate":"2024-10-07 06:29:34","title":"ירי רקטות וטילים","data":"אשקלון","category":1}]' rows="7"></textarea>
-        <div class="upload-actions">
-          <button class="btn btn-primary" id="btnPasteLoad">טען JSON</button>
-          <button class="btn btn-secondary" id="btnClearUpload">נקה ועבור לנתונים חיים</button>
-          <label class="btn btn-secondary file-label">
-            בחר קובץ
-            <input type="file" id="fileInput" accept=".json" style="display:none" />
-          </label>
-        </div>
-      </div>
-    </section>
+      <button class="btn btn-sync" id="btnSyncBanner">סנכרן עכשיו</button>
+    </div>
 
     <!-- Filters Bar -->
     <section class="filters-bar">
@@ -67,8 +66,8 @@
       </div>
 
       <div class="filter-group">
-        <label>תאריך התחלה (ברירת מחדל: הכל)</label>
-        <input type="date" id="globalStartDate" class="date-input" />
+        <label>תאריך התחלה</label>
+        <input type="date" id="globalStartDate" class="date-input" title="ברירת מחדל: כל הזמן" />
         <button class="btn btn-secondary" id="btnSetStartDate">קבע</button>
       </div>
 
@@ -140,7 +139,7 @@
     <!-- Loading -->
     <div id="loadingOverlay" class="overlay hidden">
       <div class="spinner"></div>
-      <p>טוען נתונים מפיקוד העורף...</p>
+      <p id="loadingMsg">טוען נתונים...</p>
     </div>
 
     <!-- Error Banner -->
