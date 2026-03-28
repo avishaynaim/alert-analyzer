@@ -6,8 +6,8 @@ from datetime import datetime, timedelta
 from dateutil import parser as dateparser
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
-import psycopg2
-from psycopg2.extras import RealDictCursor, execute_values
+import psycopg
+from psycopg.rows import dict_row
 from apscheduler.schedulers.background import BackgroundScheduler
 
 logging.basicConfig(level=logging.INFO)
@@ -36,7 +36,7 @@ OREF_HEADERS = {
 # ── Database ────────────────────────────────────────────────────────────
 
 def get_conn():
-    return psycopg2.connect(DATABASE_URL)
+    return psycopg.connect(DATABASE_URL)
 
 
 def init_db():
@@ -104,7 +104,7 @@ def save_alerts(raw_list, source="oref"):
 
     added = 0
     with get_conn() as conn:
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=dict_row) as cur:
             for row in rows:
                 try:
                     cur.execute("""
@@ -118,8 +118,8 @@ def save_alerts(raw_list, source="oref"):
                     conn.rollback()
                     continue
 
-            cur.execute("SELECT COUNT(*) FROM alerts")
-            total = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) as cnt FROM alerts")
+            total = cur.fetchone()["cnt"]
 
             cur.execute("""
                 INSERT INTO sync_log (source, records_added, total_records, status)
@@ -173,7 +173,7 @@ def auto_sync():
         log.warning(f"Auto-sync failed: {err}")
         if DATABASE_URL:
             with get_conn() as conn:
-                with conn.cursor() as cur:
+                with conn.cursor(row_factory=dict_row) as cur:
                     cur.execute("INSERT INTO sync_log (source, records_added, total_records, status) VALUES ('scheduler', 0, 0, %s)", (f"failed: {err}",))
                 conn.commit()
         return
@@ -211,7 +211,7 @@ def query_alerts(from_date=None, to_date=None, areas=None):
         LIMIT 500000
     """
     with get_conn() as conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        with conn.cursor(row_factory=dict_row) as cur:
             cur.execute(sql, params)
             rows = cur.fetchall()
 
@@ -234,7 +234,7 @@ def get_db_stats():
     if not DATABASE_URL:
         return {}
     with get_conn() as conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        with conn.cursor(row_factory=dict_row) as cur:
             cur.execute("SELECT COUNT(*) as total FROM alerts")
             total = cur.fetchone()["total"]
             cur.execute("SELECT MIN(alert_date) as earliest, MAX(alert_date) as latest FROM alerts")
@@ -245,7 +245,7 @@ def get_db_stats():
         "total": total,
         "earliest": row["earliest"].isoformat() if row["earliest"] else None,
         "latest": row["latest"].isoformat() if row["latest"] else None,
-        "last_sync": dict(last_sync) if last_sync else None,
+        "last_sync": last_sync if last_sync else None,
     }
 
 
@@ -288,9 +288,9 @@ def get_areas():
     if not DATABASE_URL:
         return jsonify([])
     with get_conn() as conn:
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=dict_row) as cur:
             cur.execute("SELECT DISTINCT area FROM alerts WHERE area IS NOT NULL AND area != '' ORDER BY area")
-            areas = [r[0] for r in cur.fetchall()]
+            areas = [r["area"] for r in cur.fetchall()]
     return jsonify(areas)
 
 
