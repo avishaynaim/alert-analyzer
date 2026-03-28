@@ -191,6 +191,64 @@ function renderHourChart(buckets) {
   });
 }
 
+/* ===== Alert Map ===== */
+let alertMap = null;
+let mapMarkers = [];
+
+function markerStyle(count, maxCount) {
+  const r = count / maxCount;
+  if (r >= 0.66) return { color: "#ef4444", fill: "rgba(239,68,68,0.75)" };
+  if (r >= 0.25) return { color: "#f59e0b", fill: "rgba(245,158,11,0.75)" };
+  return { color: "#10b981", fill: "rgba(16,185,129,0.75)" };
+}
+
+function initMap() {
+  if (alertMap) return;
+  alertMap = L.map("alertMap", { zoomControl: true }).setView([31.5, 34.85], 8);
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+    attribution: '© <a href="https://carto.com">CARTO</a> © <a href="https://openstreetmap.org">OSM</a>',
+    subdomains: "abcd",
+    maxZoom: 19,
+  }).addTo(alertMap);
+}
+
+async function loadMap() {
+  initMap();
+  try {
+    const res = await fetch(`/api/map?${buildParams()}`);
+    const data = await res.json();
+    const { points, geocoded_total } = data;
+
+    $("mapGeoBadge").textContent = `${geocoded_total.toLocaleString("he-IL")} מיקומים ממופים`;
+
+    // Clear old markers
+    mapMarkers.forEach(m => alertMap.removeLayer(m));
+    mapMarkers = [];
+
+    if (!points.length) return;
+
+    const maxCount = points[0].count;
+    points.forEach(p => {
+      const { color, fill } = markerStyle(p.count, maxCount);
+      const radius = Math.max(5, Math.min(28, 5 + (p.count / maxCount) * 23));
+      const m = L.circleMarker([p.lat, p.lng], {
+        radius,
+        color,
+        fillColor: fill,
+        fillOpacity: 0.8,
+        weight: 1.5,
+      }).addTo(alertMap);
+      m.bindPopup(
+        `<strong>${p.area}</strong><br>` +
+        `<span style="color:#94a3b8">${p.count.toLocaleString("he-IL")} התרעות</span>`
+      );
+      mapMarkers.push(m);
+    });
+  } catch(e) {
+    logErr("Map load failed:", e);
+  }
+}
+
 /* ===== Areas table ===== */
 let _allAreasData = [];
 
@@ -256,6 +314,7 @@ async function render() {
 
     if (hasData) {
       renderHourChart(data.hour_buckets);
+      loadMap();
       renderAreasTable(data.top_areas, $("areasTableSearch").value);
     }
     log(`Render complete — ${data.total} alerts`);
@@ -374,6 +433,21 @@ async function init() {
 
   $("areasTableSearch").addEventListener("input", () => {
     renderAreasTable(_allAreasData, $("areasTableSearch").value);
+  });
+
+  $("btnGeocodeMore").addEventListener("click", async () => {
+    $("btnGeocodeMore").disabled = true;
+    $("btnGeocodeMore").textContent = "⏳ ממפה...";
+    try {
+      await fetch("/api/geocode", { method: "POST" });
+      $("mapGeoBadge").textContent = "ממפה ברקע... (כ-90 שניות)";
+      setTimeout(loadMap, 95000);
+    } finally {
+      setTimeout(() => {
+        $("btnGeocodeMore").disabled = false;
+        $("btnGeocodeMore").textContent = "📍 טען מיקומים";
+      }, 95000);
+    }
   });
 
   const areaSearch = $("areaSearch");

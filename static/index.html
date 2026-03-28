@@ -5,7 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>מנתח התרעות פיקוד העורף</title>
   <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body>
   <header>
@@ -117,6 +119,23 @@
       </div>
       <div class="chart-container">
         <canvas id="hourChart"></canvas>
+      </div>
+    </section>
+
+    <!-- Alert Map -->
+    <section class="chart-section" id="mapSection">
+      <div class="chart-header">
+        <h2>מפת התרעות — ישראל</h2>
+        <div class="map-header-right">
+          <span id="mapGeoBadge" class="chart-hint"></span>
+          <button class="btn btn-secondary btn-sm" id="btnGeocodeMore" title="טען עוד מיקומים">📍 טען מיקומים</button>
+        </div>
+      </div>
+      <div id="alertMap"></div>
+      <div class="map-legend">
+        <span class="map-legend-item"><span class="map-dot green"></span> מעט</span>
+        <span class="map-legend-item"><span class="map-dot yellow"></span> בינוני</span>
+        <span class="map-legend-item"><span class="map-dot red"></span> רב</span>
       </div>
     </section>
 

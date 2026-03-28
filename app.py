@@ -2,6 +2,8 @@ import os
 import re
 import json
 import logging
+import threading
+import time
 import requests
 from datetime import datetime, timedelta
 from dateutil import parser as dateparser
@@ -131,6 +133,13 @@ def init_db():
                     total_records  INTEGER,
                     status         TEXT
                 );
+
+                CREATE TABLE IF NOT EXISTS geocache (
+                    area          TEXT PRIMARY KEY,
+                    lat           DOUBLE PRECISION,
+                    lng           DOUBLE PRECISION,
+                    geocoded_at   TIMESTAMP DEFAULT NOW()
+                );
             """)
         conn.commit()
     log.info("Database ready")
@@ -210,6 +219,73 @@ def log_sync_error(source, error_msg):
         pass
 
 
+# ── Geocoding ─────────────────────────────────────────────────────────────
+
+_geocoding_lock = threading.Lock()
+
+def geocode_area(name):
+    """Query Nominatim for a single Israeli area name. Returns (lat, lng) or (None, None)."""
+    try:
+        resp = requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={"q": name, "countrycodes": "il", "format": "json", "limit": 1},
+            headers={"User-Agent": "oref-alert-analyzer/1.0 (github.com/avishaynaim/alert-analyzer)"},
+            timeout=8,
+        )
+        data = resp.json()
+        if data:
+            return float(data[0]["lat"]), float(data[0]["lon"])
+    except Exception as e:
+        log.debug(f"Geocode failed for '{name}': {e}")
+    return None, None
+
+
+def geocode_missing(limit=80):
+    """Geocode the top `limit` areas not yet in geocache. Rate-limited: 1 req/sec."""
+    if not DATABASE_URL:
+        return
+    if not _geocoding_lock.acquire(blocking=False):
+        log.info("Geocoding already running, skipping")
+        return
+    try:
+        with get_conn() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute("""
+                    SELECT a.area, COUNT(*) AS cnt
+                    FROM alerts a
+                    LEFT JOIN geocache g ON a.area = g.area
+                    WHERE a.area IS NOT NULL AND a.area != ''
+                      AND g.area IS NULL
+                    GROUP BY a.area
+                    ORDER BY cnt DESC
+                    LIMIT %s
+                """, (limit,))
+                missing = [r["area"] for r in cur.fetchall()]
+
+        log.info(f"Geocoding {len(missing)} missing areas...")
+        done = 0
+        for name in missing:
+            lat, lng = geocode_area(name)
+            if lat is not None:
+                with get_conn() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "INSERT INTO geocache (area, lat, lng) VALUES (%s,%s,%s) "
+                            "ON CONFLICT (area) DO NOTHING",
+                            (name, lat, lng),
+                        )
+                    conn.commit()
+                done += 1
+            time.sleep(1.1)   # Nominatim rate limit
+        log.info(f"Geocoding complete: {done}/{len(missing)} resolved")
+    finally:
+        _geocoding_lock.release()
+
+
+def geocode_in_background(limit=80):
+    threading.Thread(target=geocode_missing, args=(limit,), daemon=True).start()
+
+
 # ── Auto sync job ─────────────────────────────────────────────────────────
 
 def auto_sync():
@@ -218,6 +294,7 @@ def auto_sync():
         alerts, updated = fetch_from_github()
         added, total = save_alerts(alerts, source=f"github:{updated or 'unknown'}")
         log.info(f"=== Auto-sync done: +{added:,} new, {total:,} total ===")
+        geocode_in_background(80)
     except Exception as e:
         log.error(f"Auto-sync failed: {e}")
         log_sync_error("github-scheduler", str(e))
@@ -414,6 +491,53 @@ def get_areas():
     return jsonify(areas)
 
 
+@app.route("/api/map")
+def get_map_data():
+    if not DATABASE_URL:
+        return jsonify({"points": [], "geocoded_total": 0})
+
+    from_date   = request.args.get("from_date")
+    to_date     = request.args.get("to_date")
+    preset      = request.args.get("preset")
+    areas_param = request.args.get("areas")
+
+    from_date, to_date = parse_preset(preset, from_date, to_date)
+    areas = [a.strip() for a in areas_param.split(",")] if areas_param else None
+
+    conditions, params = [], []
+    if from_date:
+        conditions.append("a.date_only >= %s"); params.append(from_date)
+    if to_date:
+        conditions.append("a.date_only <= %s"); params.append(to_date)
+    if areas:
+        conditions.append("a.area = ANY(%s)"); params.append(areas)
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+
+    with get_conn() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(f"""
+                SELECT a.area, COUNT(*) AS cnt, g.lat, g.lng
+                FROM alerts a
+                JOIN geocache g ON a.area = g.area
+                {where}
+                GROUP BY a.area, g.lat, g.lng
+                ORDER BY cnt DESC
+            """, params)
+            points = [{"area": r["area"], "count": r["cnt"],
+                       "lat": r["lat"], "lng": r["lng"]} for r in cur.fetchall()]
+
+            cur.execute("SELECT COUNT(*) AS n FROM geocache")
+            geocoded_total = cur.fetchone()["n"]
+
+    return jsonify({"points": points, "geocoded_total": geocoded_total})
+
+
+@app.route("/api/geocode", methods=["POST"])
+def trigger_geocode():
+    geocode_in_background(100)
+    return jsonify({"ok": True, "message": "Geocoding started in background"})
+
+
 @app.route("/api/sync", methods=["POST"])
 def sync():
     """
@@ -459,6 +583,8 @@ if DATABASE_URL:
                       next_run_time=datetime.now() + timedelta(seconds=10))
     scheduler.start()
     log.info("Scheduler started — GitHub sync in 10s, then every 6 hours")
+    # Kick off geocoding 60s after startup (after initial sync begins)
+    threading.Timer(60, lambda: geocode_in_background(100)).start()
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=5050)
