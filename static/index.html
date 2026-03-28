@@ -120,14 +120,23 @@
       </div>
     </section>
 
-    <!-- Top Areas Chart -->
+    <!-- All Areas Table -->
     <section class="chart-section">
       <div class="chart-header">
         <h2>כל האזורים והערים — לפי מספר התרעות</h2>
-        <div id="areaChartHint" class="chart-hint">לחץ על אזור לסינון הגרף</div>
+        <div id="areaChartHint" class="chart-hint">לחץ על שורה לסינון גרף השעות</div>
       </div>
-      <div id="areasChartContainer" class="chart-container chart-container--tall">
-        <canvas id="areasChart"></canvas>
+      <div class="areas-search-bar">
+        <input type="text" id="areasTableSearch" class="search-input" placeholder="חפש אזור..." />
+        <span id="areasTableCount" class="areas-count-badge"></span>
+      </div>
+      <div class="areas-table-wrap">
+        <table class="areas-table">
+          <thead>
+            <tr><th>#</th><th>אזור / עיר</th><th>התרעות</th><th class="bar-col"></th></tr>
+          </thead>
+          <tbody id="areasTableBody"></tbody>
+        </table>
       </div>
     </section>
 

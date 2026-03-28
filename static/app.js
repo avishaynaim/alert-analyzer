@@ -13,8 +13,7 @@ const state = {
   allAreas: [],
 };
 
-let hourChart  = null;
-let areasChart = null;
+let hourChart = null;
 
 const $ = id => document.getElementById(id);
 
@@ -192,76 +191,44 @@ function renderHourChart(buckets) {
   });
 }
 
-/* ===== Render areas chart ===== */
-let _currentTopAreas = [];
+/* ===== Areas table ===== */
+let _allAreasData = [];
 
-function getAreaColors(topAreas) {
-  const n = Math.max(topAreas.length - 1, 1);
-  return topAreas.map((a, i) => {
-    if (state.selectedAreas.has(a.area)) return "rgba(250,204,21,0.95)"; // gold highlight
-    const t = i / n;
-    if (t < 0.5) { const u=t*2; return `rgba(${Math.round(59+u*40)},${Math.round(130-u*28)},246,0.85)`; }
-    const u=(t-0.5)*2;
-    return `rgba(${Math.round(99+u*140)},${Math.round(102-u*34)},${Math.round(241-u*173)},0.85)`;
-  });
-}
+function renderAreasTable(allAreas, filter) {
+  _allAreasData = allAreas;
+  const q = (filter || "").trim().toLowerCase();
+  const filtered = q ? allAreas.filter(a => a.area.toLowerCase().includes(q)) : allAreas;
+  const maxCount = allAreas[0]?.count || 1;
 
-function handleAreaClick(elements) {
-  if (!elements.length) return;
-  const area = _currentTopAreas[elements[0].index]?.area;
-  if (!area) return;
-  if (state.selectedAreas.has(area) && state.selectedAreas.size === 1) {
-    state.selectedAreas.clear();
-  } else {
-    state.selectedAreas.clear();
-    state.selectedAreas.add(area);
-  }
-  renderSelectedTags();
-  render();
-}
+  $("areasTableCount").textContent = `${filtered.length.toLocaleString("he-IL")} אזורים`;
 
-function renderAreasChart(topAreas) {
-  _currentTopAreas = topAreas;
-  const labels = topAreas.map(a => a.area);
-  const values = topAreas.map(a => a.count);
-  const colors = getAreaColors(topAreas);
+  const tbody = $("areasTableBody");
+  tbody.innerHTML = filtered.map((a, i) => {
+    const sel = state.selectedAreas.has(a.area);
+    const pct = Math.round((a.count / maxCount) * 100);
+    const rank = q ? allAreas.indexOf(a) + 1 : i + 1;
+    return `<tr class="${sel ? "selected" : ""}" data-area="${a.area.replace(/"/g,'&quot;')}">
+      <td>${rank}</td>
+      <td class="area-name">${a.area}</td>
+      <td class="area-count">${a.count.toLocaleString("he-IL")}</td>
+      <td class="bar-col"><div class="area-bar-bg"><div class="area-bar-fill" style="width:${pct}%"></div></div></td>
+    </tr>`;
+  }).join("");
 
-  // Dynamic height: 26px per bar, min 300px
-  const h = Math.max(300, topAreas.length * 26);
-  $("areasChartContainer").style.height = h + "px";
-
-  if (areasChart) {
-    areasChart.data.labels = labels;
-    areasChart.data.datasets[0].data = values;
-    areasChart.data.datasets[0].backgroundColor = colors;
-    areasChart.update("none"); return;
-  }
-
-  areasChart = new Chart($("areasChart").getContext("2d"), {
-    type: "bar",
-    data: { labels, datasets: [{ label: "התרעות", data: values, backgroundColor: colors, borderRadius: 4, borderSkipped: false }] },
-    options: {
-      indexAxis: "y", responsive: true, maintainAspectRatio: false,
-      animation: { duration: 600, easing: "easeOutQuart" },
-      onClick: (_, elements) => handleAreaClick(elements),
-      onHover: (evt) => { evt.native.target.style.cursor = "pointer"; },
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          rtl: true,
-          backgroundColor: "rgba(14,17,23,0.95)", borderColor: "#252d3d", borderWidth: 1,
-          titleColor: "#e2e8f0", bodyColor: "#94a3b8", padding: 12, cornerRadius: 8,
-          callbacks: {
-            title: i => i[0].label,
-            label: i => ` ${i.raw.toLocaleString("he-IL")} התרעות${state.selectedAreas.has(i.label) ? " ✓ נבחר" : " — לחץ לסנן"}`
-          }
-        }
-      },
-      scales: {
-        x: { grid: { color: "rgba(37,45,61,0.5)" }, ticks: { color: "#475569", precision: 0 }, beginAtZero: true },
-        y: { grid: { display: false }, ticks: { color: "#e2e8f0", font: { size: 12 } } }
+  tbody.querySelectorAll("tr").forEach(row => {
+    row.addEventListener("click", () => {
+      const area = row.dataset.area;
+      if (state.selectedAreas.has(area) && state.selectedAreas.size === 1) {
+        state.selectedAreas.clear();
+      } else {
+        state.selectedAreas.clear();
+        state.selectedAreas.add(area);
       }
-    }
+      renderSelectedTags();
+      // Re-color table rows without full reload
+      tbody.querySelectorAll("tr").forEach(r => r.classList.toggle("selected", state.selectedAreas.has(r.dataset.area)));
+      render();
+    });
   });
 }
 
@@ -285,12 +252,12 @@ async function render() {
     updateDbBadge(data.total);
     showEmpty(!hasData);
 
-    $("hourChart").closest(".chart-section").style.display  = hasData ? "" : "none";
-    $("areasChart").closest(".chart-section").style.display = hasData ? "" : "none";
+    $("hourChart").closest(".chart-section").style.display      = hasData ? "" : "none";
+    $("areasTableBody").closest(".chart-section").style.display = hasData ? "" : "none";
 
     if (hasData) {
       renderHourChart(data.hour_buckets);
-      renderAreasChart(data.top_areas);
+      renderAreasTable(data.top_areas, $("areasTableSearch").value);
     }
     log(`Render complete — ${data.total} alerts`);
   } catch(e) {
@@ -405,6 +372,10 @@ async function init() {
   });
 
   $("btnCloseError").addEventListener("click", () => $("errorBanner").classList.add("hidden"));
+
+  $("areasTableSearch").addEventListener("input", () => {
+    renderAreasTable(_allAreasData, $("areasTableSearch").value);
+  });
 
   const areaSearch = $("areaSearch");
   areaSearch.addEventListener("input",  () => renderAreaDropdown(areaSearch.value));

@@ -473,6 +473,89 @@ main {
 .chart-container { position: relative; height: 320px; }
 .chart-container--tall { height: 380px; }
 
+/* ===== Areas Table ===== */
+.areas-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 0.75rem;
+}
+.areas-count-badge {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.areas-table-wrap {
+  max-height: 480px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-bright) transparent;
+}
+.areas-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.areas-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface2);
+  padding: 8px 12px;
+  text-align: right;
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 0.73rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--border);
+  z-index: 1;
+}
+.areas-table tbody tr {
+  cursor: pointer;
+  transition: background 0.12s;
+  border-bottom: 1px solid rgba(37,45,61,0.5);
+}
+.areas-table tbody tr:hover { background: var(--surface3); }
+.areas-table tbody tr.selected {
+  background: rgba(250,204,21,0.1);
+  border-bottom-color: rgba(250,204,21,0.25);
+}
+.areas-table td {
+  padding: 7px 12px;
+  color: var(--text);
+  vertical-align: middle;
+}
+.areas-table td:first-child {
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  width: 40px;
+  text-align: center;
+}
+.areas-table td.area-name { font-weight: 500; }
+.areas-table tr.selected td.area-name { color: rgba(250,204,21,0.95); }
+.areas-table td.area-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  width: 70px;
+  text-align: left;
+}
+.areas-table td.bar-col { width: 140px; padding-left: 16px; }
+.area-bar-bg {
+  background: var(--surface3);
+  border-radius: 3px;
+  height: 6px;
+  overflow: hidden;
+}
+.area-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--primary);
+  transition: width 0.3s ease;
+}
+.areas-table tr.selected .area-bar-fill { background: rgba(250,204,21,0.85); }
+
 /* ===== Empty State ===== */
 .empty-state {
   display: flex;
