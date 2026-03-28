@@ -193,14 +193,8 @@ function renderHourChart(buckets) {
 
 /* ===== Alert Map ===== */
 let alertMap = null;
-let mapMarkers = [];
-
-function markerStyle(count, maxCount) {
-  const r = count / maxCount;
-  if (r >= 0.66) return { color: "#ef4444", fill: "rgba(239,68,68,0.75)" };
-  if (r >= 0.25) return { color: "#f59e0b", fill: "rgba(245,158,11,0.75)" };
-  return { color: "#10b981", fill: "rgba(16,185,129,0.75)" };
-}
+let heatLayer = null;
+let mapDotMarkers = [];
 
 function initMap() {
   if (alertMap) return;
@@ -221,28 +215,38 @@ async function loadMap() {
 
     $("mapGeoBadge").textContent = `${geocoded_total.toLocaleString("he-IL")} מיקומים ממופים`;
 
-    // Clear old markers
-    mapMarkers.forEach(m => alertMap.removeLayer(m));
-    mapMarkers = [];
+    // Remove old layers
+    if (heatLayer) { alertMap.removeLayer(heatLayer); heatLayer = null; }
+    mapDotMarkers.forEach(m => alertMap.removeLayer(m));
+    mapDotMarkers = [];
 
     if (!points.length) return;
 
     const maxCount = points[0].count;
+
+    // Heat layer — each point weighted by count
+    const heatData = points.map(p => [p.lat, p.lng, p.count / maxCount]);
+    heatLayer = L.heatLayer(heatData, {
+      radius: 30,
+      blur: 22,
+      maxZoom: 13,
+      max: 1.0,
+      gradient: { 0.0: "#22c55e", 0.35: "#84cc16", 0.6: "#eab308", 0.8: "#f97316", 1.0: "#ef4444" },
+    }).addTo(alertMap);
+
+    // Circle markers on top for interactivity (popup on click)
     points.forEach(p => {
-      const { color, fill } = markerStyle(p.count, maxCount);
-      const radius = Math.max(5, Math.min(28, 5 + (p.count / maxCount) * 23));
+      const r = p.count / maxCount;
+      const color = r >= 0.8 ? "#ef4444" : r >= 0.6 ? "#f97316" : r >= 0.35 ? "#eab308" : "#22c55e";
+      const radius = Math.max(4, Math.min(18, 4 + r * 14));
       const m = L.circleMarker([p.lat, p.lng], {
-        radius,
-        color,
-        fillColor: fill,
-        fillOpacity: 0.8,
-        weight: 1.5,
+        radius, color, fillColor: color, fillOpacity: 0.15, weight: 1.5, opacity: 0.7,
       }).addTo(alertMap);
       m.bindPopup(
         `<strong>${p.area}</strong><br>` +
         `<span style="color:#94a3b8">${p.count.toLocaleString("he-IL")} התרעות</span>`
       );
-      mapMarkers.push(m);
+      mapDotMarkers.push(m);
     });
   } catch(e) {
     logErr("Map load failed:", e);
