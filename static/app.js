@@ -225,9 +225,8 @@ function renderAreasTable(allAreas, filter) {
         state.selectedAreas.add(area);
       }
       renderSelectedTags();
-      // Re-color table rows without full reload
       tbody.querySelectorAll("tr").forEach(r => r.classList.toggle("selected", state.selectedAreas.has(r.dataset.area)));
-      render();
+      setTimeout(render, 0);
     });
   });
 }
@@ -252,8 +251,8 @@ async function render() {
     updateDbBadge(data.total);
     showEmpty(!hasData);
 
-    $("hourChart").closest(".chart-section").style.display      = hasData ? "" : "none";
-    $("areasTableBody").closest(".chart-section").style.display = hasData ? "" : "none";
+    $("hourChart").closest(".chart-section").style.display = hasData ? "" : "none";
+    $("areasSection").style.display                        = hasData ? "" : "none";
 
     if (hasData) {
       renderHourChart(data.hour_buckets);
