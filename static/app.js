@@ -1,3 +1,8 @@
+/* ===== Logger ===== */
+const log = (...args) => console.log('[Alert]', ...args);
+const logErr = (...args) => console.error('[Alert ERROR]', ...args);
+const logWarn = (...args) => console.warn('[Alert WARN]', ...args);
+
 /* ===== State ===== */
 const state = {
   allAlerts: [],
@@ -20,11 +25,49 @@ function showLoading(v, msg = "טוען נתונים...") {
   $("loadingOverlay").classList.toggle("hidden", !v);
   $("loadingMsg").textContent = msg;
 }
-function showEmpty(v) { $("emptyState").classList.toggle("hidden", !v); }
+
+function showEmpty(v) {
+  $("emptyState").classList.toggle("hidden", !v);
+}
+
 function showError(msg) {
+  logErr(msg);
   $("errorMsg").textContent = msg;
   $("errorBanner").classList.remove("hidden");
-  setTimeout(() => $("errorBanner").classList.add("hidden"), 9000);
+  setTimeout(() => $("errorBanner").classList.add("hidden"), 12000);
+}
+
+/* ===== Console script for CORS workaround ===== */
+const BACKEND_URL = window.location.origin;
+const CONSOLE_SCRIPT = `(async () => {
+  try {
+    console.log('[OREF Sync] Fetching alerts...');
+    const r = await fetch('/WarningMessages/History/AlertsHistory.json');
+    if (!r.ok) throw new Error('OREF returned ' + r.status);
+    const data = await r.json();
+    console.log('[OREF Sync] Got', data.length, 'alerts. Sending to backend...');
+    const res = await fetch('${BACKEND_URL}/api/sync', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(data)
+    });
+    const result = await res.json();
+    if (!result.ok) throw new Error(result.error);
+    alert('✅ סנכרון הושלם!\\n' + result.added + ' רשומות חדשות\\nסה"כ בבסיס: ' + result.total);
+  } catch(e) {
+    alert('❌ שגיאה: ' + e.message);
+    console.error('[OREF Sync] Error:', e);
+  }
+})();`;
+
+function showCorsModal() {
+  log('Showing CORS modal with console script');
+  $("consoleScript").textContent = CONSOLE_SCRIPT;
+  $("corsModal").classList.remove("hidden");
+}
+
+function hideCorsModal() {
+  $("corsModal").classList.add("hidden");
 }
 
 /* ===== DB Status Badge ===== */
@@ -34,134 +77,134 @@ function updateDbBadge(stats) {
     badge.className = "badge badge-empty";
     badge.textContent = "● בסיס נתונים ריק";
     $("emptyDbBanner").classList.remove("hidden");
+    log('DB is empty');
   } else {
     badge.className = "badge badge-live";
-    const fmt = n => n.toLocaleString("he-IL");
-    badge.textContent = `● ${fmt(stats.total)} התרעות בבסיס`;
+    badge.textContent = `● ${stats.total.toLocaleString("he-IL")} התרעות`;
     $("emptyDbBanner").classList.add("hidden");
+    log(`DB has ${stats.total} records, range: ${stats.earliest} → ${stats.latest}`);
     if (stats.last_sync) {
-      const d = new Date(stats.last_sync.synced_at);
-      badge.title = `סנכרון אחרון: ${d.toLocaleString("he-IL")}`;
+      badge.title = `סנכרון אחרון: ${new Date(stats.last_sync.synced_at).toLocaleString("he-IL")}`;
     }
   }
 }
 
 /* ===== Sync progress bar ===== */
 function showSyncBar(msg, pct = null) {
+  log('Sync:', msg, pct !== null ? pct + '%' : '');
   $("syncBar").classList.remove("hidden");
   $("syncBarLabel").textContent = msg;
   $("syncBarInner").style.width = pct !== null ? pct + "%" : "0%";
   if (pct === null) $("syncBarInner").classList.add("indeterminate");
   else $("syncBarInner").classList.remove("indeterminate");
 }
+
 function hideSyncBar() {
-  setTimeout(() => $("syncBar").classList.add("hidden"), 1500);
+  setTimeout(() => $("syncBar").classList.add("hidden"), 2000);
   $("syncBarInner").style.width = "100%";
+  $("syncBarInner").classList.remove("indeterminate");
 }
 
-/* ===== OREF Fetch from browser ===== */
-const OREF_URL = "https://www.oref.org.il/WarningMessages/History/AlertsHistory.json";
-const OREF_HEADERS = {
-  "Referer": "https://www.oref.org.il/heb/alerts-history",
-  "Accept": "application/json, text/plain, */*",
-  "X-Requested-With": "XMLHttpRequest",
-};
-
-async function fetchOrefFromBrowser() {
-  showSyncBar("מתחבר לשרתי פיקוד העורף...", null);
-  const resp = await fetch(OREF_URL, { headers: OREF_HEADERS, mode: "cors" });
-  if (!resp.ok) throw new Error(`OREF returned ${resp.status}`);
-  const text = await resp.text();
-  // Strip BOM if present
-  const clean = text.replace(/^\uFEFF/, "").trim();
-  if (!clean) throw new Error("Empty response from OREF");
-  return JSON.parse(clean);
-}
-
+/* ===== Sync flow ===== */
 async function runSync() {
+  log('=== Sync started ===');
   const btns = [$("btnSync"), $("btnSyncBanner")].filter(Boolean);
-  btns.forEach(b => { b.disabled = true; const ic = b.querySelector(".sync-icon"); if (ic) ic.style.animation = "spin 0.7s linear infinite"; });
+  btns.forEach(b => {
+    b.disabled = true;
+    const ic = b.querySelector(".sync-icon");
+    if (ic) ic.style.animation = "spin 0.7s linear infinite";
+  });
 
   try {
-    showSyncBar("מנסה משיכה ישירה מהשרת...", 10);
+    // Step 1: try server-side fetch
+    showSyncBar("מנסה משיכה ישירה מהשרת...", 15);
+    log('Step 1: attempting server-side OREF fetch via POST /api/sync with empty body');
 
-    // 1. First try server-side fetch (works if server is in Israel)
-    let res = await fetch("/api/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: "[]" });
-    let data = await res.json();
+    const res1 = await fetch("/api/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "[]",
+    });
 
-    if (data.needs_browser_sync) {
-      // 2. Fallback: fetch from browser and push to server
-      showSyncBar("שרת חסום — מושך דרך הדפדפן...", 25);
-      const alerts = await fetchOrefFromBrowser();
-      showSyncBar(`נמצאו ${alerts.length.toLocaleString("he-IL")} התרעות — שומר בבסיס...`, 65);
+    log('Server sync response status:', res1.status);
+    const data1 = await res1.json();
+    log('Server sync response:', data1);
 
-      res = await fetch("/api/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(alerts),
-      });
-      data = await res.json();
+    if (data1.needs_browser_sync) {
+      // Step 2: CORS workaround — show console script modal
+      logWarn('Server geo-blocked. Showing CORS console-script modal.');
+      hideSyncBar();
+      showCorsModal();
+      return;
     }
 
-    if (!data.ok) throw new Error(data.error || "Sync failed");
+    if (!data1.ok) throw new Error(data1.error || "Server sync failed");
 
-    showSyncBar(`✓ סנכרון הושלם — ${data.added?.toLocaleString("he-IL")} רשומות חדשות`, 100);
+    showSyncBar(`✓ סנכרון הושלם — ${(data1.added || 0).toLocaleString("he-IL")} רשומות חדשות`, 100);
     hideSyncBar();
+    log('Sync complete. Reloading data...');
     await loadAll();
 
   } catch (e) {
+    logErr('Sync failed:', e);
     hideSyncBar();
     showError("שגיאת סנכרון: " + e.message);
   } finally {
-    btns.forEach(b => { b.disabled = false; const ic = b.querySelector(".sync-icon"); if (ic) ic.style.animation = ""; });
+    btns.forEach(b => {
+      b.disabled = false;
+      const ic = b.querySelector(".sync-icon");
+      if (ic) ic.style.animation = "";
+    });
   }
 }
 
 /* ===== API ===== */
 async function fetchAlerts(from_date, to_date, areas) {
   const qs = new URLSearchParams();
-  // globalStartDate is the floor — use whichever is later
+
   const effectiveFrom = from_date && state.globalStartDate
     ? (from_date > state.globalStartDate ? from_date : state.globalStartDate)
     : (from_date || state.globalStartDate || null);
+
   if (effectiveFrom) qs.set("from_date", effectiveFrom);
   if (to_date) qs.set("to_date", to_date);
   if (areas && areas.length) qs.set("areas", areas.join(","));
 
-  const res = await fetch(`/api/alerts?${qs}`);
+  const url = `/api/alerts?${qs}`;
+  log('Fetching alerts:', url);
+
+  const res = await fetch(url);
+  log('Alerts response status:', res.status);
+
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `HTTP ${res.status}`);
   }
-  return res.json();
+  const data = await res.json();
+  log(`Got ${data.length} alerts`);
+  return data;
 }
 
-/* ===== Filter logic ===== */
+/* ===== Date range helper ===== */
 function getDateRange() {
   const now = new Date();
   if (state.preset === "24h") {
-    return [
-      new Date(now - 86400000).toISOString().slice(0,10),
-      now.toISOString().slice(0,10),
-    ];
+    return [new Date(now - 86400000).toISOString().slice(0,10), now.toISOString().slice(0,10)];
   }
   if (state.preset === "day") {
     const d = now.toISOString().slice(0,10);
     return [d, d];
   }
   if (state.preset === "week") {
-    return [
-      new Date(now - 7 * 86400000).toISOString().slice(0,10),
-      now.toISOString().slice(0,10),
-    ];
+    return [new Date(now - 7 * 86400000).toISOString().slice(0,10), now.toISOString().slice(0,10)];
   }
   if (state.preset === "custom") {
     return [state.fromDate, state.toDate];
   }
-  return [state.globalStartDate || null, null];
+  return [null, null];
 }
 
-/* ===== Compute hour buckets ===== */
+/* ===== Hour buckets ===== */
 function computeHourBuckets(alerts) {
   const b = new Array(24).fill(0);
   alerts.forEach(a => { if (a.hour >= 0 && a.hour <= 23) b[a.hour]++; });
@@ -183,6 +226,7 @@ function renderHourChart(alerts) {
   const buckets = computeHourBuckets(alerts);
   const labels = Array.from({ length: 24 }, (_, i) => String(i).padStart(2,"0") + ":00");
   const colors = getBarColors(buckets);
+  log('Hour chart — peak hour:', buckets.indexOf(Math.max(...buckets)) + ':00 with', Math.max(...buckets), 'alerts');
 
   if (hourChart) {
     hourChart.data.datasets[0].data = buckets;
@@ -250,6 +294,8 @@ function renderAreasChart(alerts) {
   const sorted = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,15);
   const labels = sorted.map(e => e[0]);
   const values = sorted.map(e => e[1]);
+  log('Top area:', labels[0], '—', values[0], 'alerts');
+
   const n = Math.max(values.length - 1, 1);
   const barColors = values.map((_, i) => {
     const t = i / n;
@@ -274,13 +320,7 @@ function renderAreasChart(alerts) {
     type: "bar",
     data: {
       labels,
-      datasets: [{
-        label: "התרעות",
-        data: values,
-        backgroundColor: barColors,
-        borderRadius: 5,
-        borderSkipped: false,
-      }]
+      datasets: [{ label: "התרעות", data: values, backgroundColor: barColors, borderRadius: 5, borderSkipped: false }]
     },
     options: {
       indexAxis: "y",
@@ -302,15 +342,8 @@ function renderAreasChart(alerts) {
         }
       },
       scales: {
-        x: {
-          grid: { color: "rgba(37,45,61,0.5)" },
-          ticks: { color: "#475569", precision: 0 },
-          beginAtZero: true,
-        },
-        y: {
-          grid: { display: false },
-          ticks: { color: "#e2e8f0", font: { size: 12 } },
-        }
+        x: { grid: { color: "rgba(37,45,61,0.5)" }, ticks: { color: "#475569", precision: 0 }, beginAtZero: true },
+        y: { grid: { display: false }, ticks: { color: "#e2e8f0", font: { size: 12 } } }
       }
     }
   });
@@ -346,10 +379,10 @@ async function render() {
   try {
     const [from, to] = getDateRange();
     const areas = state.selectedAreas.size ? [...state.selectedAreas] : null;
-    const alerts = await fetchAlerts(from, to, areas);
+    log(`Rendering — preset:${state.preset} from:${from} to:${to} areas:${areas}`);
 
+    const alerts = await fetchAlerts(from, to, areas);
     state.allAlerts = alerts;
-    state.filteredAlerts = alerts;
 
     const hasData = alerts.length > 0;
     showEmpty(!hasData);
@@ -361,25 +394,32 @@ async function render() {
       renderHourChart(alerts);
       renderAreasChart(alerts);
     }
+    log(`Render complete — ${alerts.length} alerts displayed`);
   } catch(e) {
+    logErr('render() failed:', e);
     showError("שגיאה בטעינת נתונים: " + e.message);
   } finally {
     showLoading(false);
   }
 }
 
-/* ===== Area dropdown ===== */
+/* ===== Areas ===== */
 async function loadAreas() {
+  log('Loading areas list...');
   try {
     const res = await fetch("/api/areas");
     state.allAreas = res.ok ? await res.json() : [];
-  } catch { state.allAreas = []; }
+    log(`Loaded ${state.allAreas.length} areas`);
+  } catch(e) {
+    logWarn('Failed to load areas:', e.message);
+    state.allAreas = [];
+  }
 }
 
 function renderAreaDropdown(filter = "") {
   const dropdown = $("areaDropdown");
   const lower = filter.toLowerCase();
-  const items = state.allAreas.filter(a=>a.toLowerCase().includes(lower)).slice(0,80);
+  const items = state.allAreas.filter(a => a.toLowerCase().includes(lower)).slice(0, 80);
   if (!items.length) { dropdown.style.display = "none"; return; }
   dropdown.innerHTML = items.map(area => {
     const sel = state.selectedAreas.has(area);
@@ -406,25 +446,34 @@ function renderSelectedTags() {
 
 /* ===== Load everything ===== */
 async function loadAll() {
-  const [statusRes, areasRes] = await Promise.all([
-    fetch("/api/status").then(r=>r.json()).catch(()=>({})),
+  log('Loading status + areas...');
+  const [statusData] = await Promise.all([
+    fetch("/api/status").then(r => {
+      log('Status response:', r.status);
+      return r.json();
+    }).catch(e => { logErr('Status fetch failed:', e); return {}; }),
     loadAreas(),
   ]);
-  updateDbBadge(statusRes.db);
+  log('Status data:', statusData);
+  updateDbBadge(statusData.db);
   await render();
 }
 
 /* ===== Init ===== */
 async function init() {
+  log('=== App initializing ===');
+  log('Backend:', BACKEND_URL);
+
   await loadAll();
 
   // Preset buttons
   document.querySelectorAll(".btn-filter").forEach(btn => {
     btn.addEventListener("click", () => {
-      document.querySelectorAll(".btn-filter").forEach(b=>b.classList.remove("active"));
+      document.querySelectorAll(".btn-filter").forEach(b => b.classList.remove("active"));
       btn.classList.add("active");
       state.preset = btn.dataset.preset;
-      $("customDateGroup").style.display = state.preset==="custom" ? "flex" : "none";
+      $("customDateGroup").style.display = state.preset === "custom" ? "flex" : "none";
+      log('Preset changed to:', state.preset);
       render();
     });
   });
@@ -432,16 +481,30 @@ async function init() {
   $("btnApplyDates").addEventListener("click", () => {
     state.fromDate = $("fromDate").value || null;
     state.toDate = $("toDate").value || null;
+    log('Custom dates:', state.fromDate, '→', state.toDate);
     render();
   });
 
   $("btnSetStartDate").addEventListener("click", () => {
     state.globalStartDate = $("globalStartDate").value || null;
+    log('Global start date set to:', state.globalStartDate);
     render();
   });
 
   $("btnSync").addEventListener("click", runSync);
   $("btnSyncBanner")?.addEventListener("click", runSync);
+
+  $("btnCloseModal").addEventListener("click", hideCorsModal);
+  $("corsModal").addEventListener("click", e => { if (e.target === $("corsModal")) hideCorsModal(); });
+
+  $("btnCopyScript").addEventListener("click", () => {
+    navigator.clipboard.writeText(CONSOLE_SCRIPT).then(() => {
+      $("btnCopyScript").textContent = "✓ הועתק!";
+      setTimeout(() => { $("btnCopyScript").textContent = "📋 העתק קוד"; }, 2500);
+    });
+  });
+
+  $("btnCloseError").addEventListener("click", () => $("errorBanner").classList.add("hidden"));
 
   // Area search
   const areaSearch = $("areaSearch");
@@ -459,6 +522,8 @@ async function init() {
     renderSelectedTags();
     render();
   });
+
+  log('=== App ready ===');
 }
 
 document.addEventListener("DOMContentLoaded", init);

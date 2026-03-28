@@ -145,7 +145,32 @@
     <!-- Error Banner -->
     <div id="errorBanner" class="error-banner hidden">
       <span id="errorMsg"></span>
-      <button onclick="document.getElementById('errorBanner').classList.add('hidden')">✕</button>
+      <button id="btnCloseError">✕</button>
+    </div>
+
+    <!-- Console Script Modal (CORS workaround) -->
+    <div id="corsModal" class="modal-backdrop hidden">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>🔒 סנכרון דרך קונסול הדפדפן</h3>
+          <button class="modal-close" id="btnCloseModal">✕</button>
+        </div>
+        <div class="modal-body">
+          <p>האתר חסום ל-CORS — צריך להריץ את הסקריפט <strong>מתוך</strong> אתר פיקוד העורף:</p>
+          <ol class="modal-steps">
+            <li>פתח לשונית חדשה ועבור לאתר:<br>
+              <a href="https://www.oref.org.il/heb/alerts-history" target="_blank" class="oref-link">
+                www.oref.org.il/heb/alerts-history
+              </a>
+            </li>
+            <li>לחץ <kbd>F12</kbd> לפתיחת DevTools → לשונית <kbd>Console</kbd></li>
+            <li>הדבק את הקוד הבא והקש Enter:</li>
+          </ol>
+          <div class="code-block" id="consoleScript"></div>
+          <button class="btn btn-primary" id="btnCopyScript">📋 העתק קוד</button>
+          <p class="text-muted" style="margin-top:10px">לאחר הרצת הסקריפט חזור לכאן ורענן את הדף.</p>
+        </div>
+      </div>
     </div>
   </main>
 
