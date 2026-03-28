@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>מנתח התרעות פיקוד העורף</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <header>
+    <div class="header-content">
+      <div class="logo">
+        <span class="logo-icon">🚨</span>
+        <div>
+          <h1>מנתח התרעות</h1>
+          <p class="subtitle">פיקוד העורף — ניתוח זמני סיכון</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <span id="dataSourceBadge" class="badge badge-live">● נתונים חיים</span>
+        <button class="btn btn-secondary" id="btnUploadToggle">📂 טען נתונים</button>
+        <button class="btn btn-secondary" id="btnRefresh">↻ רענן</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- Upload / Paste Panel -->
+    <section class="upload-panel hidden" id="uploadPanel">
+      <div class="upload-header">
+        <h3>טעינת נתונים ידנית</h3>
+        <p class="text-muted">הדבק JSON ממאגר ההתרעות של פיקוד העורף, או גרור קובץ JSON לכאן.</p>
+      </div>
+      <div class="upload-body">
+        <textarea id="pasteArea" placeholder='[{"alertDate":"2024-10-07 06:29:34","title":"ירי רקטות וטילים","data":"אשקלון","category":1}]' rows="7"></textarea>
+        <div class="upload-actions">
+          <button class="btn btn-primary" id="btnPasteLoad">טען JSON</button>
+          <button class="btn btn-secondary" id="btnClearUpload">נקה ועבור לנתונים חיים</button>
+          <label class="btn btn-secondary file-label">
+            בחר קובץ
+            <input type="file" id="fileInput" accept=".json" style="display:none" />
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <!-- Filters Bar -->
+    <section class="filters-bar">
+      <div class="filter-group">
+        <label>טווח זמן</label>
+        <div class="btn-group">
+          <button class="btn btn-filter active" data-preset="all">הכל</button>
+          <button class="btn btn-filter" data-preset="24h">24 שעות</button>
+          <button class="btn btn-filter" data-preset="day">היום</button>
+          <button class="btn btn-filter" data-preset="week">שבוע</button>
+          <button class="btn btn-filter" data-preset="custom">מותאם</button>
+        </div>
+      </div>
+
+      <div class="filter-group" id="customDateGroup" style="display:none;">
+        <label>מ-</label>
+        <input type="date" id="fromDate" class="date-input" />
+        <label>עד</label>
+        <input type="date" id="toDate" class="date-input" />
+        <button class="btn btn-primary" id="btnApplyDates">החל</button>
+      </div>
+
+      <div class="filter-group">
+        <label>תאריך התחלה (ברירת מחדל: הכל)</label>
+        <input type="date" id="globalStartDate" class="date-input" />
+        <button class="btn btn-secondary" id="btnSetStartDate">קבע</button>
+      </div>
+
+      <div class="filter-group">
+        <label>אזור / עיר</label>
+        <div class="multiselect-wrapper">
+          <input type="text" id="areaSearch" class="search-input" placeholder="חפש..." />
+          <div id="areaDropdown" class="area-dropdown" style="display:none;"></div>
+        </div>
+        <div id="selectedAreas" class="selected-tags"></div>
+      </div>
+    </section>
+
+    <!-- Stats Cards -->
+    <section class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon">📊</div>
+        <div class="stat-value" id="statTotal">—</div>
+        <div class="stat-label">סך התרעות</div>
+      </div>
+      <div class="stat-card danger">
+        <div class="stat-icon">⏰</div>
+        <div class="stat-value" id="statPeakHour">—</div>
+        <div class="stat-label">שעת שיא</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">📍</div>
+        <div class="stat-value" id="statTopArea">—</div>
+        <div class="stat-label">אזור מוביל</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">📅</div>
+        <div class="stat-value" id="statDateRange">—</div>
+        <div class="stat-label">טווח תאריכים</div>
+      </div>
+    </section>
+
+    <!-- Hour Distribution Chart -->
+    <section class="chart-section">
+      <div class="chart-header">
+        <h2>התפלגות התרעות לפי שעה ביממה (00:00 – 23:59)</h2>
+        <div class="chart-legend">
+          <span class="legend-dot low"></span> נמוך
+          <span class="legend-dot mid"></span> בינוני
+          <span class="legend-dot high"></span> גבוה
+        </div>
+      </div>
+      <div class="chart-container">
+        <canvas id="hourChart"></canvas>
+      </div>
+    </section>
+
+    <!-- Top Areas Chart -->
+    <section class="chart-section">
+      <div class="chart-header">
+        <h2>אזורים/ערים מובילים (Top 15)</h2>
+      </div>
+      <div class="chart-container chart-container--tall">
+        <canvas id="areasChart"></canvas>
+      </div>
+    </section>
+
+    <!-- Empty state -->
+    <div id="emptyState" class="empty-state hidden">
+      <div class="empty-icon">📭</div>
+      <p>לא נמצאו התרעות בטווח הנבחר</p>
+    </div>
+
+    <!-- Loading -->
+    <div id="loadingOverlay" class="overlay hidden">
+      <div class="spinner"></div>
+      <p>טוען נתונים מפיקוד העורף...</p>
+    </div>
+
+    <!-- Error Banner -->
+    <div id="errorBanner" class="error-banner hidden">
+      <span id="errorMsg"></span>
+      <button onclick="document.getElementById('errorBanner').classList.add('hidden')">✕</button>
+    </div>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
