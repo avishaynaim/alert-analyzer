@@ -448,24 +448,93 @@ def seed_geocache_from_known():
     log.info(f"Geocache seeded with {inserted} known areas")
 
 
+def approximate_missing():
+    """
+    For areas not yet geocoded, infer coordinates from KNOWN_COORDS using:
+    1. "City - Suffix" → use the base city coords
+    2. A known name is a substring of the area name (or vice versa)
+    Runs fast (pure Python, no API calls).
+    """
+    if not DATABASE_URL:
+        return 0
+    with get_conn() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute("""
+                SELECT DISTINCT a.area FROM alerts a
+                LEFT JOIN geocache g ON a.area = g.area
+                WHERE a.area IS NOT NULL AND a.area != '' AND g.area IS NULL
+            """)
+            missing = [r["area"] for r in cur.fetchall()]
+
+    to_insert = []
+    for name in missing:
+        lat, lng = None, None
+
+        # Strategy 1: "Base - Direction/Suffix" → look up Base
+        if " - " in name:
+            base = name.split(" - ")[0].strip()
+            if base in KNOWN_COORDS:
+                lat, lng = KNOWN_COORDS[base]
+
+        # Strategy 2: a known name is contained in this name
+        if lat is None:
+            for known, coords in KNOWN_COORDS.items():
+                if len(known) >= 3 and known in name:
+                    lat, lng = coords
+                    break
+
+        # Strategy 3: this name is contained in a known name
+        if lat is None:
+            for known, coords in KNOWN_COORDS.items():
+                if len(name) >= 4 and name in known:
+                    lat, lng = coords
+                    break
+
+        if lat is not None:
+            to_insert.append((name, lat, lng))
+
+    if to_insert:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                for area, lat, lng in to_insert:
+                    cur.execute(
+                        "INSERT INTO geocache (area, lat, lng) VALUES (%s,%s,%s) "
+                        "ON CONFLICT (area) DO NOTHING",
+                        (area, lat, lng),
+                    )
+            conn.commit()
+        log.info(f"Approximated coords for {len(to_insert)} more areas")
+    return len(to_insert)
+
+
 # ── Geocoding ─────────────────────────────────────────────────────────────
 
 _geocoding_lock = threading.Lock()
 
 def geocode_area(name):
-    """Query Nominatim for a single Israeli area name. Returns (lat, lng) or (None, None)."""
-    try:
-        resp = requests.get(
-            "https://nominatim.openstreetmap.org/search",
-            params={"q": name, "countrycodes": "il", "format": "json", "limit": 1},
-            headers={"User-Agent": "oref-alert-analyzer/1.0 (github.com/avishaynaim/alert-analyzer)"},
-            timeout=8,
-        )
-        data = resp.json()
-        if data:
-            return float(data[0]["lat"]), float(data[0]["lon"])
-    except Exception as e:
-        log.debug(f"Geocode failed for '{name}': {e}")
+    """Query Nominatim for an Israeli area name. Tries multiple strategies."""
+    queries = [name]
+    if " - " in name:
+        queries.append(name.split(" - ")[0].strip())  # base city fallback
+
+    for q in queries:
+        for params in [
+            {"q": q, "countrycodes": "il", "format": "json", "limit": 1},
+            {"q": f"{q} Israel",            "format": "json", "limit": 1},
+        ]:
+            try:
+                resp = requests.get(
+                    "https://nominatim.openstreetmap.org/search", params=params,
+                    headers={"User-Agent": "oref-alert-analyzer/1.0"},
+                    timeout=8,
+                )
+                data = resp.json()
+                if data:
+                    return float(data[0]["lat"]), float(data[0]["lon"])
+            except Exception as e:
+                log.debug(f"Geocode query failed '{q}': {e}")
+            time.sleep(1.1)
+
     return None, None
 
 
@@ -523,6 +592,7 @@ def auto_sync():
         alerts, updated = fetch_from_github()
         added, total = save_alerts(alerts, source=f"github:{updated or 'unknown'}")
         log.info(f"=== Auto-sync done: +{added:,} new, {total:,} total ===")
+        approximate_missing()
         geocode_in_background(80)
     except Exception as e:
         log.error(f"Auto-sync failed: {e}")
@@ -812,7 +882,8 @@ if DATABASE_URL:
                       next_run_time=datetime.now() + timedelta(seconds=10))
     scheduler.start()
     log.info("Scheduler started — GitHub sync in 10s, then every 6 hours")
-    # Kick off geocoding 60s after startup (after initial sync begins)
+    # After initial sync completes (~30s), run approximation + Nominatim geocoding
+    threading.Timer(30, approximate_missing).start()
     threading.Timer(60, lambda: geocode_in_background(100)).start()
 
 if __name__ == "__main__":
