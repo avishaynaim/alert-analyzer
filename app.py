@@ -162,25 +162,27 @@ def save_alerts(raw_list, source="github"):
             json.dumps(alert, ensure_ascii=False),
         ))
 
-    added = 0
     with get_conn() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
-            for row in rows:
-                try:
-                    cur.execute("""
-                        INSERT INTO alerts
-                            (alert_date, title, area, category, category_desc, hour, date_only, raw)
-                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-                        ON CONFLICT (alert_date, area) DO NOTHING
-                    """, row)
-                    added += cur.rowcount
-                except Exception as e:
-                    log.warning(f"Row insert error: {e}")
-                    conn.rollback()
-                    continue
+            # Count before
+            cur.execute("SELECT COUNT(*) as cnt FROM alerts")
+            before = cur.fetchone()["cnt"]
+
+            # Batch insert in chunks of 5000
+            CHUNK = 5000
+            for i in range(0, len(rows), CHUNK):
+                chunk = rows[i:i + CHUNK]
+                cur.executemany("""
+                    INSERT INTO alerts
+                        (alert_date, title, area, category, category_desc, hour, date_only, raw)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (alert_date, area) DO NOTHING
+                """, chunk)
+                log.info(f"Inserted chunk {i//CHUNK + 1}/{(len(rows)-1)//CHUNK + 1}")
 
             cur.execute("SELECT COUNT(*) as cnt FROM alerts")
             total = cur.fetchone()["cnt"]
+            added = total - before
 
             cur.execute("""
                 INSERT INTO sync_log (source, records_added, total_records, status)
