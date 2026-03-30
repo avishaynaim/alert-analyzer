@@ -158,10 +158,10 @@ function getBarColors(buckets) {
 }
 
 /* ===== Render hour chart ===== */
-function renderHourChart(buckets, weekBuckets, numWeeks) {
+function renderHourChart(buckets, weekBuckets, totalDays) {
   const labels = Array.from({length:24}, (_,i) => String(i).padStart(2,"0")+":00");
   const colors = getBarColors(buckets);
-  const avgLabel = `ממוצע שבועי (${numWeeks} שבועות)`;
+  const avgLabel = `ממוצע יומי (${totalDays} ימים)`;
 
   if (hourChart) {
     hourChart.data.datasets[0].data = buckets;
@@ -189,8 +189,8 @@ function renderHourChart(buckets, weekBuckets, numWeeks) {
           callbacks: {
             title: i => `שעה ${i[0].label}`,
             label: i => i.datasetIndex === 1
-              ? ` 7 ימים אחרונים: ${i.raw.toLocaleString("he-IL")} התרעות`
-              : ` ממוצע שבועי: ${i.raw.toLocaleString("he-IL")} התרעות`
+              ? ` ממוצע יומי (7 ימים): ${i.raw.toLocaleString("he-IL")} התרעות`
+              : ` ממוצע יומי (כלל): ${i.raw.toLocaleString("he-IL")} התרעות`
           }
         }
       },
@@ -328,7 +328,7 @@ async function render() {
     $("areasSection").style.display                        = hasData ? "" : "none";
 
     if (hasData) {
-      renderHourChart(data.hour_weekly_avg || data.hour_buckets, data.week_hour_buckets || [], data.num_weeks || 1);
+      renderHourChart(data.hour_daily_avg || data.hour_buckets, data.week_hour_daily_avg || [], data.total_days || 1);
       loadMap();
       renderAreasTable(data.top_areas, $("areasTableSearch").value);
     }

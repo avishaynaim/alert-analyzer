@@ -888,18 +888,22 @@ def get_analytics():
                 if 0 <= r["hour"] <= 23:
                     hour_buckets[r["hour"]] = r["cnt"]
 
-            # Number of distinct ISO weeks in filtered period → for normalization
+            # Date range (needed for daily-average normalization)
             cur.execute(f"""
-                SELECT COUNT(DISTINCT TO_CHAR(date_only, 'IYYY-IW')) as num_weeks
+                SELECT MIN(date_only) as earliest, MAX(date_only) as latest
                 FROM alerts {where}
             """, params)
-            num_weeks = cur.fetchone()["num_weeks"] or 1
-            # Weekly average per hour (same unit as current-week line)
-            hour_weekly_avg = [round(b / num_weeks, 1) for b in hour_buckets]
+            dr = cur.fetchone()
+            if dr["earliest"] and dr["latest"]:
+                total_days = max(1, (dr["latest"] - dr["earliest"]).days + 1)
+            else:
+                total_days = 1
+            # Daily average per hour across the filtered period
+            hour_daily_avg = [round(b / total_days, 2) for b in hour_buckets]
 
-            # Last-7-days per-hour count (always last 7 days, ignores filters)
+            # Last-7-days daily average per hour (always last 7 days, ignores filters)
             today = date.today()
-            last7_start = today - timedelta(days=6)  # 7 full days including today
+            last7_start = today - timedelta(days=6)
             cur.execute("""
                 SELECT hour, COUNT(*) as cnt
                 FROM alerts
@@ -907,11 +911,10 @@ def get_analytics():
                   AND hour IS NOT NULL
                 GROUP BY hour ORDER BY hour
             """, [last7_start.isoformat(), today.isoformat()])
-            week_rows = cur.fetchall()
-            week_hour_buckets = [0.0] * 24
-            for r in week_rows:
+            week_hour_daily_avg = [0.0] * 24
+            for r in cur.fetchall():
                 if 0 <= r["hour"] <= 23:
-                    week_hour_buckets[r["hour"]] = float(r["cnt"])
+                    week_hour_daily_avg[r["hour"]] = round(r["cnt"] / 7, 2)
 
             # All areas ranked by count
             cur.execute(f"""
@@ -922,26 +925,22 @@ def get_analytics():
             """, params)
             top_areas = [{"area": r["area"], "count": r["cnt"]} for r in cur.fetchall()]
 
-            # Date range
-            cur.execute(f"""
-                SELECT MIN(date_only)::text as earliest, MAX(date_only)::text as latest
-                FROM alerts {where}
-            """, params)
-            dates = cur.fetchone()
+            dates = {"earliest": dr["earliest"].isoformat() if dr["earliest"] else None,
+                     "latest":   dr["latest"].isoformat()   if dr["latest"]   else None}
 
             # Peak hour
             peak_hour = hour_buckets.index(max(hour_buckets)) if total else None
 
     return jsonify({
-        "total":             total,
-        "peak_hour":         peak_hour,
-        "hour_buckets":      hour_buckets,
-        "hour_weekly_avg":   hour_weekly_avg,
-        "num_weeks":         num_weeks,
-        "week_hour_buckets": week_hour_buckets,
-        "top_areas":         top_areas,
-        "earliest":          dates["earliest"],
-        "latest":            dates["latest"],
+        "total":              total,
+        "peak_hour":          peak_hour,
+        "hour_buckets":       hour_buckets,
+        "hour_daily_avg":     hour_daily_avg,
+        "total_days":         total_days,
+        "week_hour_daily_avg": week_hour_daily_avg,
+        "top_areas":          top_areas,
+        "earliest":           dates["earliest"],
+        "latest":             dates["latest"],
     })
 
 
