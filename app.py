@@ -897,17 +897,16 @@ def get_analytics():
             # Weekly average per hour (same unit as current-week line)
             hour_weekly_avg = [round(b / num_weeks, 1) for b in hour_buckets]
 
-            # Current-week per-hour count (always current week, ignores filters)
+            # Last-7-days per-hour count (always last 7 days, ignores filters)
             today = date.today()
-            week_start = today - timedelta(days=today.weekday())  # Monday
-            week_end   = week_start + timedelta(days=6)           # Sunday
+            last7_start = today - timedelta(days=6)  # 7 full days including today
             cur.execute("""
                 SELECT hour, COUNT(*) as cnt
                 FROM alerts
                 WHERE date_only >= %s AND date_only <= %s
                   AND hour IS NOT NULL
                 GROUP BY hour ORDER BY hour
-            """, [week_start.isoformat(), week_end.isoformat()])
+            """, [last7_start.isoformat(), today.isoformat()])
             week_rows = cur.fetchall()
             week_hour_buckets = [0.0] * 24
             for r in week_rows:

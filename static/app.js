@@ -166,8 +166,8 @@ function renderHourChart(buckets, weekBuckets, numWeeks) {
   if (hourChart) {
     hourChart.data.datasets[0].data = buckets;
     hourChart.data.datasets[0].backgroundColor = colors;
+    hourChart.data.datasets[0].label = avgLabel;
     hourChart.data.datasets[1].data = weekBuckets;
-    hourChart.data.datasets[1].label = avgLabel;
     hourChart.update("active"); return;
   }
 
@@ -175,7 +175,7 @@ function renderHourChart(buckets, weekBuckets, numWeeks) {
     type: "bar",
     data: { labels, datasets: [
       { label: avgLabel, data: buckets, backgroundColor: colors, borderRadius: 5, borderSkipped: false, order: 2 },
-      { label: "שבוע נוכחי", data: weekBuckets, type: "line", borderColor: "rgba(168,85,247,0.9)", backgroundColor: "rgba(168,85,247,0.15)", borderWidth: 2, pointRadius: 3, pointBackgroundColor: "rgba(168,85,247,0.9)", tension: 0.3, fill: false, order: 1 }
+      { label: "7 ימים אחרונים", data: weekBuckets, type: "line", borderColor: "rgba(168,85,247,0.9)", backgroundColor: "rgba(168,85,247,0.15)", borderWidth: 2, pointRadius: 3, pointBackgroundColor: "rgba(168,85,247,0.9)", tension: 0.3, fill: false, order: 1 }
     ]},
     options: {
       responsive: true, maintainAspectRatio: false,
@@ -189,7 +189,7 @@ function renderHourChart(buckets, weekBuckets, numWeeks) {
           callbacks: {
             title: i => `שעה ${i[0].label}`,
             label: i => i.datasetIndex === 1
-              ? ` שבוע נוכחי: ${i.raw.toLocaleString("he-IL")} התרעות`
+              ? ` 7 ימים אחרונים: ${i.raw.toLocaleString("he-IL")} התרעות`
               : ` ממוצע שבועי: ${i.raw.toLocaleString("he-IL")} התרעות`
           }
         }
