@@ -158,29 +158,38 @@ function getBarColors(buckets) {
 }
 
 /* ===== Render hour chart ===== */
-function renderHourChart(buckets) {
+function renderHourChart(buckets, weekBuckets) {
   const labels = Array.from({length:24}, (_,i) => String(i).padStart(2,"0")+":00");
   const colors = getBarColors(buckets);
 
   if (hourChart) {
     hourChart.data.datasets[0].data = buckets;
     hourChart.data.datasets[0].backgroundColor = colors;
+    hourChart.data.datasets[1].data = weekBuckets;
     hourChart.update("active"); return;
   }
 
   hourChart = new Chart($("hourChart").getContext("2d"), {
     type: "bar",
-    data: { labels, datasets: [{ label: "התרעות", data: buckets, backgroundColor: colors, borderRadius: 5, borderSkipped: false }] },
+    data: { labels, datasets: [
+      { label: "סה״כ (סינון)", data: buckets, backgroundColor: colors, borderRadius: 5, borderSkipped: false, order: 2 },
+      { label: "ממוצע שבוע נוכחי", data: weekBuckets, type: "line", borderColor: "rgba(168,85,247,0.9)", backgroundColor: "rgba(168,85,247,0.15)", borderWidth: 2, pointRadius: 3, pointBackgroundColor: "rgba(168,85,247,0.9)", tension: 0.3, fill: false, order: 1 }
+    ]},
     options: {
       responsive: true, maintainAspectRatio: false,
       animation: { duration: 600, easing: "easeOutQuart" },
       plugins: {
-        legend: { display: false },
+        legend: { display: true, position: "top", labels: { color: "#94a3b8", font: { size: 12 }, boxWidth: 16, padding: 12 } },
         tooltip: {
           rtl: true,
           backgroundColor: "rgba(14,17,23,0.95)", borderColor: "#252d3d", borderWidth: 1,
           titleColor: "#e2e8f0", bodyColor: "#94a3b8", padding: 12, cornerRadius: 8,
-          callbacks: { title: i => `שעה ${i[0].label}`, label: i => ` ${i.raw.toLocaleString("he-IL")} התרעות` }
+          callbacks: {
+            title: i => `שעה ${i[0].label}`,
+            label: i => i.datasetIndex === 1
+              ? ` ממוצע שבוע: ${i.raw.toLocaleString("he-IL")} התרעות`
+              : ` ${i.raw.toLocaleString("he-IL")} התרעות`
+          }
         }
       },
       scales: {
@@ -317,7 +326,7 @@ async function render() {
     $("areasSection").style.display                        = hasData ? "" : "none";
 
     if (hasData) {
-      renderHourChart(data.hour_buckets);
+      renderHourChart(data.hour_buckets, data.week_hour_buckets || []);
       loadMap();
       renderAreasTable(data.top_areas, $("areasTableSearch").value);
     }

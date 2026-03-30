@@ -5,7 +5,7 @@ import logging
 import threading
 import time
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from dateutil import parser as dateparser
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
@@ -888,6 +888,29 @@ def get_analytics():
                 if 0 <= r["hour"] <= 23:
                     hour_buckets[r["hour"]] = r["cnt"]
 
+            # Current-week hour averages (always current week, ignores filters)
+            today = date.today()
+            week_start = today - timedelta(days=today.weekday())  # Monday
+            week_end   = week_start + timedelta(days=6)           # Sunday
+            cur.execute("""
+                SELECT hour, COUNT(*) as cnt
+                FROM alerts
+                WHERE date_only >= %s AND date_only <= %s
+                  AND hour IS NOT NULL
+                GROUP BY hour ORDER BY hour
+            """, [week_start.isoformat(), week_end.isoformat()])
+            week_rows = cur.fetchall()
+            cur.execute("""
+                SELECT COUNT(DISTINCT date_only) as days
+                FROM alerts
+                WHERE date_only >= %s AND date_only <= %s
+            """, [week_start.isoformat(), week_end.isoformat()])
+            week_days = cur.fetchone()["days"] or 1
+            week_hour_buckets = [0.0] * 24
+            for r in week_rows:
+                if 0 <= r["hour"] <= 23:
+                    week_hour_buckets[r["hour"]] = round(r["cnt"] / week_days, 1)
+
             # All areas ranked by count
             cur.execute(f"""
                 SELECT area, COUNT(*) as cnt
@@ -908,12 +931,13 @@ def get_analytics():
             peak_hour = hour_buckets.index(max(hour_buckets)) if total else None
 
     return jsonify({
-        "total":        total,
-        "peak_hour":    peak_hour,
-        "hour_buckets": hour_buckets,
-        "top_areas":    top_areas,
-        "earliest":     dates["earliest"],
-        "latest":       dates["latest"],
+        "total":             total,
+        "peak_hour":         peak_hour,
+        "hour_buckets":      hour_buckets,
+        "week_hour_buckets": week_hour_buckets,
+        "top_areas":         top_areas,
+        "earliest":          dates["earliest"],
+        "latest":            dates["latest"],
     })
 
 
