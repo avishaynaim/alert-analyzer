@@ -875,7 +875,7 @@ def get_analytics():
             cur.execute(f"SELECT COUNT(*) as cnt FROM alerts {where}", params)
             total = cur.fetchone()["cnt"]
 
-            # Hour distribution (0–23)
+            # Hour distribution (0–23) — raw totals
             cur.execute(f"""
                 SELECT hour, COUNT(*) as cnt
                 FROM alerts {where}
@@ -888,7 +888,16 @@ def get_analytics():
                 if 0 <= r["hour"] <= 23:
                     hour_buckets[r["hour"]] = r["cnt"]
 
-            # Current-week hour averages (always current week, ignores filters)
+            # Number of distinct ISO weeks in filtered period → for normalization
+            cur.execute(f"""
+                SELECT COUNT(DISTINCT TO_CHAR(date_only, 'IYYY-IW')) as num_weeks
+                FROM alerts {where}
+            """, params)
+            num_weeks = cur.fetchone()["num_weeks"] or 1
+            # Weekly average per hour (same unit as current-week line)
+            hour_weekly_avg = [round(b / num_weeks, 1) for b in hour_buckets]
+
+            # Current-week per-hour count (always current week, ignores filters)
             today = date.today()
             week_start = today - timedelta(days=today.weekday())  # Monday
             week_end   = week_start + timedelta(days=6)           # Sunday
@@ -900,16 +909,10 @@ def get_analytics():
                 GROUP BY hour ORDER BY hour
             """, [week_start.isoformat(), week_end.isoformat()])
             week_rows = cur.fetchall()
-            cur.execute("""
-                SELECT COUNT(DISTINCT date_only) as days
-                FROM alerts
-                WHERE date_only >= %s AND date_only <= %s
-            """, [week_start.isoformat(), week_end.isoformat()])
-            week_days = cur.fetchone()["days"] or 1
             week_hour_buckets = [0.0] * 24
             for r in week_rows:
                 if 0 <= r["hour"] <= 23:
-                    week_hour_buckets[r["hour"]] = round(r["cnt"] / week_days, 1)
+                    week_hour_buckets[r["hour"]] = float(r["cnt"])
 
             # All areas ranked by count
             cur.execute(f"""
@@ -934,6 +937,8 @@ def get_analytics():
         "total":             total,
         "peak_hour":         peak_hour,
         "hour_buckets":      hour_buckets,
+        "hour_weekly_avg":   hour_weekly_avg,
+        "num_weeks":         num_weeks,
         "week_hour_buckets": week_hour_buckets,
         "top_areas":         top_areas,
         "earliest":          dates["earliest"],
