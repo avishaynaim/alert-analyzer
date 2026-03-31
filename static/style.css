@@ -943,47 +943,57 @@ kbd {
   .header-actions .badge { display: none; }
 }
 
-/* ===== Pinned city widget ===== */
+/* ===== City comparison widget ===== */
 .pinned-city-widget { margin-bottom: 0.75rem; font-size: 0.85rem; }
-
-/* pinned state */
-.city-widget-pinned {
-  display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
-  padding: 0.5rem 1rem;
-  background: rgba(34,197,94,0.08); border: 1px solid rgba(34,197,94,0.3); border-radius: 8px;
-}
-.city-widget-label { color: #64748b; }
-.city-widget-name { color: #22c55e; font-weight: 600; }
-.city-widget-clear {
-  background: rgba(34,197,94,0.15); border: 1px solid rgba(34,197,94,0.35);
-  color: #22c55e; border-radius: 6px; padding: 0.2rem 0.6rem; font-size: 0.8rem;
-  cursor: pointer; transition: background 0.15s;
-}
-.city-widget-clear:hover { background: rgba(34,197,94,0.28); }
-.city-widget-hint { color: #475569; font-size: 0.75rem; margin-right: auto; }
-
-/* search state */
-.city-widget-search {
-  display: flex; align-items: center; gap: 0.6rem;
-  padding: 0.45rem 0.9rem;
+.city-widget-row {
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+  padding: 0.5rem 0.9rem;
   background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 8px;
 }
-.city-search-wrap { position: relative; }
-.city-pin-input {
-  background: var(--surface-2); border: 1px solid var(--border);
-  color: var(--text); border-radius: 6px; padding: 0.25rem 0.65rem;
-  font-size: 0.82rem; width: 180px; outline: none;
+.city-widget-label { color: #64748b; white-space: nowrap; margin-left: 0.25rem; }
+
+/* chips */
+.city-chip {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  padding: 0.22rem 0.55rem; border-radius: 20px; cursor: pointer;
+  background: rgba(255,255,255,0.06); border: 1px solid var(--border-bright);
+  color: #94a3b8; font-size: 0.82rem; transition: all 0.15s; user-select: none;
 }
-.city-pin-input:focus { border-color: rgba(34,197,94,0.5); }
+.city-chip:hover { border-color: rgba(34,197,94,0.4); color: #22c55e; }
+.city-chip.active {
+  background: rgba(34,197,94,0.15); border-color: rgba(34,197,94,0.5); color: #22c55e; font-weight: 600;
+}
+.city-chip-remove {
+  background: none; border: none; color: inherit; cursor: pointer;
+  font-size: 0.95rem; line-height: 1; padding: 0 0.1rem; opacity: 0.6;
+}
+.city-chip-remove:hover { opacity: 1; }
+
+/* show-all button */
+.city-show-all {
+  background: rgba(100,116,139,0.12); border: 1px solid rgba(100,116,139,0.3);
+  color: #64748b; border-radius: 6px; padding: 0.22rem 0.6rem; font-size: 0.8rem;
+  cursor: pointer; transition: all 0.15s; white-space: nowrap;
+}
+.city-show-all:hover { background: rgba(100,116,139,0.22); color: #94a3b8; }
+
+/* search add */
+.city-search-wrap { position: relative; margin-right: auto; }
+.city-pin-input {
+  background: transparent; border: 1px dashed var(--border-bright);
+  color: var(--text-dim); border-radius: 20px; padding: 0.22rem 0.75rem;
+  font-size: 0.82rem; width: 130px; outline: none; transition: all 0.15s;
+}
+.city-pin-input::placeholder { color: #475569; }
+.city-pin-input:focus { border-color: rgba(34,197,94,0.5); color: var(--text); width: 180px; }
 .city-pin-dropdown {
-  position: absolute; top: calc(100% + 4px); right: 0;
+  position: absolute; top: calc(100% + 4px); left: 0;
   min-width: 200px; max-height: 220px; overflow-y: auto;
   background: var(--surface-2); border: 1px solid var(--border-bright);
   border-radius: 8px; z-index: 200; box-shadow: 0 8px 24px rgba(0,0,0,0.4);
 }
 .city-pin-option {
-  padding: 0.45rem 0.85rem; cursor: pointer; color: var(--text); font-size: 0.83rem;
-  transition: background 0.1s;
+  padding: 0.45rem 0.85rem; cursor: pointer; color: var(--text); font-size: 0.83rem; transition: background 0.1s;
 }
 .city-pin-option:hover { background: rgba(34,197,94,0.12); color: #22c55e; }
 

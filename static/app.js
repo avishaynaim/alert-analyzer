@@ -11,7 +11,8 @@ const state = {
   globalStartDate: null,
   selectedAreas: new Set(),
   allAreas: [],
-  pinnedCity: localStorage.getItem("pinnedCity") || null,
+  pinnedCity: localStorage.getItem("pinnedCity") || null,       // active comparison
+  savedCities: JSON.parse(localStorage.getItem("savedCities") || "[]"), // persisted list
 };
 
 let hourChart = null;
@@ -159,60 +160,109 @@ function getBarColors(buckets) {
 }
 
 /* ===== Pinned city helpers ===== */
+/* city = activate for chart; null = show all (saved list stays) */
 function setPinnedCity(city) {
   state.pinnedCity = city;
   if (city) localStorage.setItem("pinnedCity", city);
   else localStorage.removeItem("pinnedCity");
-  renderCityWidget();
+  // auto-add to saved list if not already there
+  if (city && !state.savedCities.includes(city)) {
+    state.savedCities.push(city);
+    localStorage.setItem("savedCities", JSON.stringify(state.savedCities));
+  }
 }
+
+function removeSavedCity(city) {
+  state.savedCities = state.savedCities.filter(c => c !== city);
+  localStorage.setItem("savedCities", JSON.stringify(state.savedCities));
+  if (state.pinnedCity === city) {
+    state.pinnedCity = null;
+    localStorage.removeItem("pinnedCity");
+  }
+}
+
+let _cityDropdownClickOutside = null;
 
 function renderCityWidget() {
   const widget = $("pinnedCityWidget");
   if (!widget) return;
 
-  if (state.pinnedCity) {
-    widget.innerHTML = `
-      <div class="city-widget-pinned">
-        <span class="city-widget-label">השוואה:</span>
-        <span class="city-widget-name">${state.pinnedCity}</span>
-        <button class="city-widget-clear" id="btnClearPin">× הצג הכל</button>
-        <span class="city-widget-hint">לחץ על עיר אחרת בטבלה להחלפה</span>
-      </div>`;
-    $("btnClearPin").addEventListener("click", () => { setPinnedCity(null); render(); });
-  } else {
-    const areas = state.allAreas.slice(0, 200);
-    widget.innerHTML = `
-      <div class="city-widget-search">
-        <span class="city-widget-label">השווה עם עיר:</span>
-        <div class="city-search-wrap">
-          <input type="text" id="cityPinSearch" class="city-pin-input" placeholder="חפש עיר..." autocomplete="off" />
-          <div id="cityPinDropdown" class="city-pin-dropdown" style="display:none">
-            ${areas.map(a => `<div class="city-pin-option" data-city="${a.replace(/"/g,'&quot;')}">${a}</div>`).join("")}
-          </div>
-        </div>
-      </div>`;
-    const input = $("cityPinSearch");
-    const dd = $("cityPinDropdown");
-    input.addEventListener("focus", () => { filterCityDropdown(""); dd.style.display = ""; });
-    input.addEventListener("input", () => filterCityDropdown(input.value));
-    document.addEventListener("click", e => { if (!e.target.closest(".city-search-wrap")) dd.style.display = "none"; }, { once: false });
-    dd.addEventListener("click", e => {
-      const opt = e.target.closest(".city-pin-option"); if (!opt) return;
-      setPinnedCity(opt.dataset.city);
+  // chips for saved cities
+  const chips = state.savedCities.map(city => {
+    const active = state.pinnedCity === city;
+    return `<span class="city-chip${active ? " active" : ""}" data-city="${city.replace(/"/g,'&quot;')}">
+      ${city}
+      <button class="city-chip-remove" data-remove="${city.replace(/"/g,'&quot;')}" title="הסר">×</button>
+    </span>`;
+  }).join("");
+
+  const showAll = state.pinnedCity
+    ? `<button class="city-show-all" id="btnShowAll">הצג הכל</button>`
+    : "";
+
+  widget.innerHTML = `
+    <div class="city-widget-row">
+      <span class="city-widget-label">השוואה בגרף:</span>
+      ${chips}
+      ${showAll}
+      <div class="city-search-wrap">
+        <input type="text" id="cityPinSearch" class="city-pin-input" placeholder="+ הוסף עיר" autocomplete="off" />
+        <div id="cityPinDropdown" class="city-pin-dropdown" style="display:none"></div>
+      </div>
+    </div>`;
+
+  if ($("btnShowAll")) {
+    $("btnShowAll").addEventListener("click", () => {
+      state.pinnedCity = null;
+      localStorage.removeItem("pinnedCity");
+      renderCityWidget();
       render();
     });
   }
+
+  // chip clicks
+  widget.querySelectorAll(".city-chip").forEach(chip => {
+    chip.addEventListener("click", e => {
+      if (e.target.closest(".city-chip-remove")) return;
+      const city = chip.dataset.city;
+      state.pinnedCity = (state.pinnedCity === city) ? null : city;
+      if (state.pinnedCity) localStorage.setItem("pinnedCity", city);
+      else localStorage.removeItem("pinnedCity");
+      renderCityWidget();
+      render();
+    });
+  });
+  widget.querySelectorAll(".city-chip-remove").forEach(btn => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      removeSavedCity(btn.dataset.remove);
+      renderCityWidget();
+      render();
+    });
+  });
+
+  // search dropdown
+  const input = $("cityPinSearch");
+  const dd = $("cityPinDropdown");
+  input.addEventListener("focus", () => { renderCityDropdown(""); dd.style.display = ""; });
+  input.addEventListener("input", () => renderCityDropdown(input.value));
+  if (_cityDropdownClickOutside) document.removeEventListener("click", _cityDropdownClickOutside);
+  _cityDropdownClickOutside = e => { if (!e.target.closest(".city-search-wrap")) dd.style.display = "none"; };
+  document.addEventListener("click", _cityDropdownClickOutside);
+  dd.addEventListener("click", e => {
+    const opt = e.target.closest(".city-pin-option"); if (!opt) return;
+    setPinnedCity(opt.dataset.city);
+    renderCityWidget();
+    render();
+  });
 }
 
-function filterCityDropdown(q) {
+function renderCityDropdown(q) {
   const dd = $("cityPinDropdown"); if (!dd) return;
   const lower = q.toLowerCase();
   const filtered = state.allAreas.filter(a => a.toLowerCase().includes(lower)).slice(0, 80);
   dd.innerHTML = filtered.map(a => `<div class="city-pin-option" data-city="${a.replace(/"/g,'&quot;')}">${a}</div>`).join("");
   dd.style.display = filtered.length ? "" : "none";
-  dd.querySelectorAll(".city-pin-option").forEach(opt => {
-    opt.addEventListener("click", () => { setPinnedCity(opt.dataset.city); render(); });
-  });
 }
 
 async function fetchPinnedCityHours() {
@@ -230,6 +280,7 @@ async function fetchPinnedCityHours() {
   const res = await fetch(`/api/analytics?${qs}`);
   if (!res.ok) return null;
   const d = await res.json();
+  log("City hours for", state.pinnedCity, "total:", d.total, "buckets sample:", d.hour_daily_avg?.slice(0,4));
   return d.hour_daily_avg || d.hour_buckets || null;
 }
 
@@ -238,48 +289,50 @@ function renderHourChart(buckets, weekBuckets, totalDays, cityBuckets) {
   const labels = Array.from({length:24}, (_,i) => String(i).padStart(2,"0")+":00");
   const colors = getBarColors(buckets);
   const avgLabel = `ממוצע יומי (${totalDays} ימים)`;
-  const cityDataset = cityBuckets ? {
-    label: state.pinnedCity,
-    data: cityBuckets,
-    type: "line",
-    yAxisID: "yRight",
-    borderColor: "rgba(34,197,94,0.9)",
-    backgroundColor: "rgba(34,197,94,0.12)",
-    borderWidth: 2,
-    pointRadius: 3,
-    pointBackgroundColor: "rgba(34,197,94,0.9)",
-    tension: 0.3,
-    fill: false,
-    order: 0
-  } : null;
-
   const yTick = v => v >= 10 ? v.toLocaleString("he-IL") : v % 1 === 0 ? v : v.toFixed(1);
+  const hasCity = !!cityBuckets;
+
+  // Destroy and recreate whenever the city presence changes (to fix yRight axis)
+  const prevHasCity = hourChart ? hourChart.data.datasets.length > 2 : null;
+  if (hourChart && prevHasCity !== hasCity) {
+    hourChart.destroy();
+    hourChart = null;
+  }
 
   if (hourChart) {
     hourChart.data.datasets[0].data = buckets;
     hourChart.data.datasets[0].backgroundColor = colors;
     hourChart.data.datasets[0].label = avgLabel;
     hourChart.data.datasets[1].data = weekBuckets;
-    if (cityDataset) {
-      if (hourChart.data.datasets[2]) {
-        hourChart.data.datasets[2].data = cityBuckets;
-        hourChart.data.datasets[2].label = state.pinnedCity;
-      } else {
-        hourChart.data.datasets.push(cityDataset);
-      }
-    } else {
-      hourChart.data.datasets.splice(2);
+    if (hasCity) {
+      hourChart.data.datasets[2].data = cityBuckets;
+      hourChart.data.datasets[2].label = state.pinnedCity;
     }
-    hourChart.options.scales.yRight.display = !!cityBuckets;
-    hourChart.options.scales.yRight.title.text = state.pinnedCity || "";
-    hourChart.update("active"); return;
+    hourChart.update("active");
+    return;
   }
 
   const datasets = [
     { label: avgLabel, data: buckets, yAxisID: "y", backgroundColor: colors, borderRadius: 5, borderSkipped: false, order: 2 },
     { label: "7 ימים אחרונים", data: weekBuckets, yAxisID: "y", type: "line", borderColor: "rgba(168,85,247,0.9)", backgroundColor: "rgba(168,85,247,0.15)", borderWidth: 2, pointRadius: 3, pointBackgroundColor: "rgba(168,85,247,0.9)", tension: 0.3, fill: false, order: 1 }
   ];
-  if (cityDataset) datasets.push(cityDataset);
+  if (hasCity) datasets.push({
+    label: state.pinnedCity, data: cityBuckets, type: "line", yAxisID: "yRight",
+    borderColor: "rgba(34,197,94,0.9)", backgroundColor: "rgba(34,197,94,0.12)",
+    borderWidth: 2, pointRadius: 3, pointBackgroundColor: "rgba(34,197,94,0.9)",
+    tension: 0.3, fill: false, order: 0
+  });
+
+  const scales = {
+    x: { grid: { color: "rgba(37,45,61,0.5)" }, ticks: { color: "#475569", font: { size: 11 } } },
+    y: { position: "left", grid: { color: "rgba(37,45,61,0.5)" }, ticks: { color: "#475569", callback: yTick }, beginAtZero: true,
+         title: { display: true, text: "ממוצע התרעות / יום (כלל)", color: "#475569", font: { size: 11 } } }
+  };
+  if (hasCity) scales.yRight = {
+    position: "right", grid: { drawOnChartArea: false },
+    ticks: { color: "rgba(34,197,94,0.85)", callback: yTick }, beginAtZero: true,
+    title: { display: true, text: state.pinnedCity, color: "rgba(34,197,94,0.85)", font: { size: 11 } }
+  };
 
   hourChart = new Chart($("hourChart").getContext("2d"), {
     type: "bar",
@@ -304,11 +357,7 @@ function renderHourChart(buckets, weekBuckets, totalDays, cityBuckets) {
           }
         }
       },
-      scales: {
-        x: { grid: { color: "rgba(37,45,61,0.5)" }, ticks: { color: "#475569", font: { size: 11 } } },
-        y: { position: "left", grid: { color: "rgba(37,45,61,0.5)" }, ticks: { color: "#475569", callback: yTick }, beginAtZero: true, title: { display: true, text: "ממוצע התרעות / יום (כלל)", color: "#475569", font: { size: 11 } } },
-        yRight: { position: "right", display: !!cityBuckets, grid: { drawOnChartArea: false }, ticks: { color: "rgba(34,197,94,0.8)", callback: yTick }, beginAtZero: true, title: { display: !!cityBuckets, text: state.pinnedCity || "", color: "rgba(34,197,94,0.8)", font: { size: 11 } } }
-      }
+      scales
     }
   });
 }
@@ -403,20 +452,18 @@ function renderAreasTable(allAreas, filter) {
   tbody.querySelectorAll("tr").forEach(row => {
     row.addEventListener("click", () => {
       const area = row.dataset.area;
-      // pin/unpin for chart comparison (no page-wide filter change)
       if (state.pinnedCity === area) {
-        setPinnedCity(null);
+        state.pinnedCity = null;
+        localStorage.removeItem("pinnedCity");
       } else {
-        setPinnedCity(area);
+        setPinnedCity(area); // also adds to savedCities
       }
-      // re-render rows to reflect pin state
+      renderCityWidget();
       tbody.querySelectorAll("tr").forEach(r => {
         const isPinned = state.pinnedCity === r.dataset.area;
         r.classList.toggle("pinned-row", isPinned);
         const nameCell = r.querySelector(".area-name");
-        if (nameCell) {
-          nameCell.innerHTML = r.dataset.area + (isPinned ? ' <span class="pin-indicator">📍</span>' : '');
-        }
+        if (nameCell) nameCell.innerHTML = r.dataset.area + (isPinned ? ' <span class="pin-indicator">📍</span>' : '');
       });
       render();
     });
