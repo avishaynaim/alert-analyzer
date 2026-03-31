@@ -943,31 +943,50 @@ kbd {
   .header-actions .badge { display: none; }
 }
 
-/* ===== Pinned city badge ===== */
-.pinned-city-badge {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
+/* ===== Pinned city widget ===== */
+.pinned-city-widget { margin-bottom: 0.75rem; font-size: 0.85rem; }
+
+/* pinned state */
+.city-widget-pinned {
+  display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
   padding: 0.5rem 1rem;
-  margin-bottom: 0.75rem;
-  background: rgba(34,197,94,0.08);
-  border: 1px solid rgba(34,197,94,0.3);
-  border-radius: 8px;
-  font-size: 0.85rem;
+  background: rgba(34,197,94,0.08); border: 1px solid rgba(34,197,94,0.3); border-radius: 8px;
 }
-.pinned-label { color: #94a3b8; }
-.pinned-label strong { color: #22c55e; }
-.pinned-clear {
-  margin-right: auto;
-  background: rgba(34,197,94,0.15);
-  border: 1px solid rgba(34,197,94,0.35);
-  color: #22c55e;
-  border-radius: 6px;
-  padding: 0.25rem 0.65rem;
-  font-size: 0.8rem;
-  cursor: pointer;
-  transition: background 0.15s;
+.city-widget-label { color: #64748b; }
+.city-widget-name { color: #22c55e; font-weight: 600; }
+.city-widget-clear {
+  background: rgba(34,197,94,0.15); border: 1px solid rgba(34,197,94,0.35);
+  color: #22c55e; border-radius: 6px; padding: 0.2rem 0.6rem; font-size: 0.8rem;
+  cursor: pointer; transition: background 0.15s;
 }
-.pinned-clear:hover { background: rgba(34,197,94,0.28); }
+.city-widget-clear:hover { background: rgba(34,197,94,0.28); }
+.city-widget-hint { color: #475569; font-size: 0.75rem; margin-right: auto; }
+
+/* search state */
+.city-widget-search {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.45rem 0.9rem;
+  background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 8px;
+}
+.city-search-wrap { position: relative; }
+.city-pin-input {
+  background: var(--surface-2); border: 1px solid var(--border);
+  color: var(--text); border-radius: 6px; padding: 0.25rem 0.65rem;
+  font-size: 0.82rem; width: 180px; outline: none;
+}
+.city-pin-input:focus { border-color: rgba(34,197,94,0.5); }
+.city-pin-dropdown {
+  position: absolute; top: calc(100% + 4px); right: 0;
+  min-width: 200px; max-height: 220px; overflow-y: auto;
+  background: var(--surface-2); border: 1px solid var(--border-bright);
+  border-radius: 8px; z-index: 200; box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+.city-pin-option {
+  padding: 0.45rem 0.85rem; cursor: pointer; color: var(--text); font-size: 0.83rem;
+  transition: background 0.1s;
+}
+.city-pin-option:hover { background: rgba(34,197,94,0.12); color: #22c55e; }
+
+/* table pin indicator */
 .pinned-row td { background: rgba(34,197,94,0.06); }
 .pin-indicator { font-size: 0.75rem; }

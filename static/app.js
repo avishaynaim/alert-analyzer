@@ -163,19 +163,56 @@ function setPinnedCity(city) {
   state.pinnedCity = city;
   if (city) localStorage.setItem("pinnedCity", city);
   else localStorage.removeItem("pinnedCity");
-  renderPinnedCityBadge();
+  renderCityWidget();
 }
 
-function renderPinnedCityBadge() {
-  const badge = $("pinnedCityBadge");
-  if (!badge) return;
+function renderCityWidget() {
+  const widget = $("pinnedCityWidget");
+  if (!widget) return;
+
   if (state.pinnedCity) {
-    badge.innerHTML = `<span class="pinned-label">השוואה: <strong>${state.pinnedCity}</strong></span><button class="pinned-clear" id="btnClearPin">× הצג הכל</button>`;
-    badge.style.display = "";
+    widget.innerHTML = `
+      <div class="city-widget-pinned">
+        <span class="city-widget-label">השוואה:</span>
+        <span class="city-widget-name">${state.pinnedCity}</span>
+        <button class="city-widget-clear" id="btnClearPin">× הצג הכל</button>
+        <span class="city-widget-hint">לחץ על עיר אחרת בטבלה להחלפה</span>
+      </div>`;
     $("btnClearPin").addEventListener("click", () => { setPinnedCity(null); render(); });
   } else {
-    badge.style.display = "none";
+    const areas = state.allAreas.slice(0, 200);
+    widget.innerHTML = `
+      <div class="city-widget-search">
+        <span class="city-widget-label">השווה עם עיר:</span>
+        <div class="city-search-wrap">
+          <input type="text" id="cityPinSearch" class="city-pin-input" placeholder="חפש עיר..." autocomplete="off" />
+          <div id="cityPinDropdown" class="city-pin-dropdown" style="display:none">
+            ${areas.map(a => `<div class="city-pin-option" data-city="${a.replace(/"/g,'&quot;')}">${a}</div>`).join("")}
+          </div>
+        </div>
+      </div>`;
+    const input = $("cityPinSearch");
+    const dd = $("cityPinDropdown");
+    input.addEventListener("focus", () => { filterCityDropdown(""); dd.style.display = ""; });
+    input.addEventListener("input", () => filterCityDropdown(input.value));
+    document.addEventListener("click", e => { if (!e.target.closest(".city-search-wrap")) dd.style.display = "none"; }, { once: false });
+    dd.addEventListener("click", e => {
+      const opt = e.target.closest(".city-pin-option"); if (!opt) return;
+      setPinnedCity(opt.dataset.city);
+      render();
+    });
   }
+}
+
+function filterCityDropdown(q) {
+  const dd = $("cityPinDropdown"); if (!dd) return;
+  const lower = q.toLowerCase();
+  const filtered = state.allAreas.filter(a => a.toLowerCase().includes(lower)).slice(0, 80);
+  dd.innerHTML = filtered.map(a => `<div class="city-pin-option" data-city="${a.replace(/"/g,'&quot;')}">${a}</div>`).join("");
+  dd.style.display = filtered.length ? "" : "none";
+  dd.querySelectorAll(".city-pin-option").forEach(opt => {
+    opt.addEventListener("click", () => { setPinnedCity(opt.dataset.city); render(); });
+  });
 }
 
 async function fetchPinnedCityHours() {
@@ -205,6 +242,7 @@ function renderHourChart(buckets, weekBuckets, totalDays, cityBuckets) {
     label: state.pinnedCity,
     data: cityBuckets,
     type: "line",
+    yAxisID: "yRight",
     borderColor: "rgba(34,197,94,0.9)",
     backgroundColor: "rgba(34,197,94,0.12)",
     borderWidth: 2,
@@ -215,12 +253,13 @@ function renderHourChart(buckets, weekBuckets, totalDays, cityBuckets) {
     order: 0
   } : null;
 
+  const yTick = v => v >= 10 ? v.toLocaleString("he-IL") : v % 1 === 0 ? v : v.toFixed(1);
+
   if (hourChart) {
     hourChart.data.datasets[0].data = buckets;
     hourChart.data.datasets[0].backgroundColor = colors;
     hourChart.data.datasets[0].label = avgLabel;
     hourChart.data.datasets[1].data = weekBuckets;
-    // update or add/remove city dataset (index 2)
     if (cityDataset) {
       if (hourChart.data.datasets[2]) {
         hourChart.data.datasets[2].data = cityBuckets;
@@ -231,12 +270,14 @@ function renderHourChart(buckets, weekBuckets, totalDays, cityBuckets) {
     } else {
       hourChart.data.datasets.splice(2);
     }
+    hourChart.options.scales.yRight.display = !!cityBuckets;
+    hourChart.options.scales.yRight.title.text = state.pinnedCity || "";
     hourChart.update("active"); return;
   }
 
   const datasets = [
-    { label: avgLabel, data: buckets, backgroundColor: colors, borderRadius: 5, borderSkipped: false, order: 2 },
-    { label: "7 ימים אחרונים", data: weekBuckets, type: "line", borderColor: "rgba(168,85,247,0.9)", backgroundColor: "rgba(168,85,247,0.15)", borderWidth: 2, pointRadius: 3, pointBackgroundColor: "rgba(168,85,247,0.9)", tension: 0.3, fill: false, order: 1 }
+    { label: avgLabel, data: buckets, yAxisID: "y", backgroundColor: colors, borderRadius: 5, borderSkipped: false, order: 2 },
+    { label: "7 ימים אחרונים", data: weekBuckets, yAxisID: "y", type: "line", borderColor: "rgba(168,85,247,0.9)", backgroundColor: "rgba(168,85,247,0.15)", borderWidth: 2, pointRadius: 3, pointBackgroundColor: "rgba(168,85,247,0.9)", tension: 0.3, fill: false, order: 1 }
   ];
   if (cityDataset) datasets.push(cityDataset);
 
@@ -265,7 +306,8 @@ function renderHourChart(buckets, weekBuckets, totalDays, cityBuckets) {
       },
       scales: {
         x: { grid: { color: "rgba(37,45,61,0.5)" }, ticks: { color: "#475569", font: { size: 11 } } },
-        y: { grid: { color: "rgba(37,45,61,0.5)" }, ticks: { color: "#475569", callback: v => v >= 10 ? v.toLocaleString("he-IL") : v % 1 === 0 ? v : v.toFixed(1) }, beginAtZero: true, title: { display: true, text: "ממוצע התרעות / יום", color: "#475569", font: { size: 11 } } }
+        y: { position: "left", grid: { color: "rgba(37,45,61,0.5)" }, ticks: { color: "#475569", callback: yTick }, beginAtZero: true, title: { display: true, text: "ממוצע התרעות / יום (כלל)", color: "#475569", font: { size: 11 } } },
+        yRight: { position: "right", display: !!cityBuckets, grid: { drawOnChartArea: false }, ticks: { color: "rgba(34,197,94,0.8)", callback: yTick }, beginAtZero: true, title: { display: !!cityBuckets, text: state.pinnedCity || "", color: "rgba(34,197,94,0.8)", font: { size: 11 } } }
       }
     }
   });
@@ -406,7 +448,7 @@ async function render() {
 
     if (hasData) {
       const cityHours = await fetchPinnedCityHours();
-      renderPinnedCityBadge();
+      renderCityWidget();
       renderHourChart(data.hour_daily_avg || data.hour_buckets, data.week_hour_daily_avg || [], data.total_days || 1, cityHours);
       loadMap();
       renderAreasTable(data.top_areas, $("areasTableSearch").value);
@@ -464,8 +506,8 @@ async function loadAll() {
 async function init() {
   log('=== App init ===');
 
-  renderPinnedCityBadge();
   await loadAll();
+  renderCityWidget();
 
   // Preset buttons
   document.querySelectorAll(".btn-filter").forEach(btn => {
