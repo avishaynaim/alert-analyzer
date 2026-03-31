@@ -942,3 +942,32 @@ kbd {
   .stats-grid { grid-template-columns: 1fr 1fr; gap: 0.75rem; }
   .header-actions .badge { display: none; }
 }
+
+/* ===== Pinned city badge ===== */
+.pinned-city-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  margin-bottom: 0.75rem;
+  background: rgba(34,197,94,0.08);
+  border: 1px solid rgba(34,197,94,0.3);
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+.pinned-label { color: #94a3b8; }
+.pinned-label strong { color: #22c55e; }
+.pinned-clear {
+  margin-right: auto;
+  background: rgba(34,197,94,0.15);
+  border: 1px solid rgba(34,197,94,0.35);
+  color: #22c55e;
+  border-radius: 6px;
+  padding: 0.25rem 0.65rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.pinned-clear:hover { background: rgba(34,197,94,0.28); }
+.pinned-row td { background: rgba(34,197,94,0.06); }
+.pin-indicator { font-size: 0.75rem; }

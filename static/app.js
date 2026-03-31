@@ -11,6 +11,7 @@ const state = {
   globalStartDate: null,
   selectedAreas: new Set(),
   allAreas: [],
+  pinnedCity: localStorage.getItem("pinnedCity") || null,
 };
 
 let hourChart = null;
@@ -157,26 +158,91 @@ function getBarColors(buckets) {
   });
 }
 
+/* ===== Pinned city helpers ===== */
+function setPinnedCity(city) {
+  state.pinnedCity = city;
+  if (city) localStorage.setItem("pinnedCity", city);
+  else localStorage.removeItem("pinnedCity");
+  renderPinnedCityBadge();
+}
+
+function renderPinnedCityBadge() {
+  const badge = $("pinnedCityBadge");
+  if (!badge) return;
+  if (state.pinnedCity) {
+    badge.innerHTML = `<span class="pinned-label">השוואה: <strong>${state.pinnedCity}</strong></span><button class="pinned-clear" id="btnClearPin">× הצג הכל</button>`;
+    badge.style.display = "";
+    $("btnClearPin").addEventListener("click", () => { setPinnedCity(null); render(); });
+  } else {
+    badge.style.display = "none";
+  }
+}
+
+async function fetchPinnedCityHours() {
+  if (!state.pinnedCity) return null;
+  const qs = new URLSearchParams();
+  if (state.preset && state.preset !== "custom") qs.set("preset", state.preset);
+  if (state.fromDate) qs.set("from_date", state.fromDate);
+  if (state.toDate)   qs.set("to_date",   state.toDate);
+  if (state.globalStartDate) {
+    const cur = qs.get("from_date");
+    const floor = (!cur || state.globalStartDate > cur) ? state.globalStartDate : cur;
+    qs.set("from_date", floor);
+  }
+  qs.set("areas", state.pinnedCity);
+  const res = await fetch(`/api/analytics?${qs}`);
+  if (!res.ok) return null;
+  const d = await res.json();
+  return d.hour_daily_avg || d.hour_buckets || null;
+}
+
 /* ===== Render hour chart ===== */
-function renderHourChart(buckets, weekBuckets, totalDays) {
+function renderHourChart(buckets, weekBuckets, totalDays, cityBuckets) {
   const labels = Array.from({length:24}, (_,i) => String(i).padStart(2,"0")+":00");
   const colors = getBarColors(buckets);
   const avgLabel = `ממוצע יומי (${totalDays} ימים)`;
+  const cityDataset = cityBuckets ? {
+    label: state.pinnedCity,
+    data: cityBuckets,
+    type: "line",
+    borderColor: "rgba(34,197,94,0.9)",
+    backgroundColor: "rgba(34,197,94,0.12)",
+    borderWidth: 2,
+    pointRadius: 3,
+    pointBackgroundColor: "rgba(34,197,94,0.9)",
+    tension: 0.3,
+    fill: false,
+    order: 0
+  } : null;
 
   if (hourChart) {
     hourChart.data.datasets[0].data = buckets;
     hourChart.data.datasets[0].backgroundColor = colors;
     hourChart.data.datasets[0].label = avgLabel;
     hourChart.data.datasets[1].data = weekBuckets;
+    // update or add/remove city dataset (index 2)
+    if (cityDataset) {
+      if (hourChart.data.datasets[2]) {
+        hourChart.data.datasets[2].data = cityBuckets;
+        hourChart.data.datasets[2].label = state.pinnedCity;
+      } else {
+        hourChart.data.datasets.push(cityDataset);
+      }
+    } else {
+      hourChart.data.datasets.splice(2);
+    }
     hourChart.update("active"); return;
   }
 
+  const datasets = [
+    { label: avgLabel, data: buckets, backgroundColor: colors, borderRadius: 5, borderSkipped: false, order: 2 },
+    { label: "7 ימים אחרונים", data: weekBuckets, type: "line", borderColor: "rgba(168,85,247,0.9)", backgroundColor: "rgba(168,85,247,0.15)", borderWidth: 2, pointRadius: 3, pointBackgroundColor: "rgba(168,85,247,0.9)", tension: 0.3, fill: false, order: 1 }
+  ];
+  if (cityDataset) datasets.push(cityDataset);
+
   hourChart = new Chart($("hourChart").getContext("2d"), {
     type: "bar",
-    data: { labels, datasets: [
-      { label: avgLabel, data: buckets, backgroundColor: colors, borderRadius: 5, borderSkipped: false, order: 2 },
-      { label: "7 ימים אחרונים", data: weekBuckets, type: "line", borderColor: "rgba(168,85,247,0.9)", backgroundColor: "rgba(168,85,247,0.15)", borderWidth: 2, pointRadius: 3, pointBackgroundColor: "rgba(168,85,247,0.9)", tension: 0.3, fill: false, order: 1 }
-    ]},
+    data: { labels, datasets },
     options: {
       responsive: true, maintainAspectRatio: false,
       animation: { duration: 600, easing: "easeOutQuart" },
@@ -188,9 +254,12 @@ function renderHourChart(buckets, weekBuckets, totalDays) {
           titleColor: "#e2e8f0", bodyColor: "#94a3b8", padding: 12, cornerRadius: 8,
           callbacks: {
             title: i => `שעה ${i[0].label}`,
-            label: i => i.datasetIndex === 1
-              ? ` ממוצע יומי (7 ימים): ${i.raw.toLocaleString("he-IL")} התרעות`
-              : ` ממוצע יומי (כלל): ${i.raw.toLocaleString("he-IL")} התרעות`
+            label: i => {
+              const v = i.raw.toLocaleString("he-IL");
+              if (i.datasetIndex === 1) return ` 7 ימים אחרונים: ${v} התרעות`;
+              if (i.datasetIndex === 2) return ` ${state.pinnedCity}: ${v} התרעות`;
+              return ` ממוצע יומי (כלל): ${v} התרעות`;
+            }
           }
         }
       },
@@ -278,11 +347,12 @@ function renderAreasTable(allAreas, filter) {
   const tbody = $("areasTableBody");
   tbody.innerHTML = filtered.map((a, i) => {
     const sel = state.selectedAreas.has(a.area);
+    const pinned = state.pinnedCity === a.area;
     const pct = Math.round((a.count / maxCount) * 100);
     const rank = q ? allAreas.indexOf(a) + 1 : i + 1;
-    return `<tr class="${sel ? "selected" : ""}" data-area="${a.area.replace(/"/g,'&quot;')}">
+    return `<tr class="${sel ? "selected" : ""} ${pinned ? "pinned-row" : ""}" data-area="${a.area.replace(/"/g,'&quot;')}">
       <td>${rank}</td>
-      <td class="area-name">${a.area}</td>
+      <td class="area-name">${a.area}${pinned ? ' <span class="pin-indicator">📍</span>' : ''}</td>
       <td class="area-count">${a.count.toLocaleString("he-IL")}</td>
       <td class="bar-col"><div class="area-bar-bg"><div class="area-bar-fill" style="width:${pct}%"></div></div></td>
     </tr>`;
@@ -291,15 +361,22 @@ function renderAreasTable(allAreas, filter) {
   tbody.querySelectorAll("tr").forEach(row => {
     row.addEventListener("click", () => {
       const area = row.dataset.area;
-      if (state.selectedAreas.has(area) && state.selectedAreas.size === 1) {
-        state.selectedAreas.clear();
+      // pin/unpin for chart comparison (no page-wide filter change)
+      if (state.pinnedCity === area) {
+        setPinnedCity(null);
       } else {
-        state.selectedAreas.clear();
-        state.selectedAreas.add(area);
+        setPinnedCity(area);
       }
-      renderSelectedTags();
-      tbody.querySelectorAll("tr").forEach(r => r.classList.toggle("selected", state.selectedAreas.has(r.dataset.area)));
-      setTimeout(render, 0);
+      // re-render rows to reflect pin state
+      tbody.querySelectorAll("tr").forEach(r => {
+        const isPinned = state.pinnedCity === r.dataset.area;
+        r.classList.toggle("pinned-row", isPinned);
+        const nameCell = r.querySelector(".area-name");
+        if (nameCell) {
+          nameCell.innerHTML = r.dataset.area + (isPinned ? ' <span class="pin-indicator">📍</span>' : '');
+        }
+      });
+      render();
     });
   });
 }
@@ -328,7 +405,9 @@ async function render() {
     $("areasSection").style.display                        = hasData ? "" : "none";
 
     if (hasData) {
-      renderHourChart(data.hour_daily_avg || data.hour_buckets, data.week_hour_daily_avg || [], data.total_days || 1);
+      const cityHours = await fetchPinnedCityHours();
+      renderPinnedCityBadge();
+      renderHourChart(data.hour_daily_avg || data.hour_buckets, data.week_hour_daily_avg || [], data.total_days || 1, cityHours);
       loadMap();
       renderAreasTable(data.top_areas, $("areasTableSearch").value);
     }
@@ -385,6 +464,7 @@ async function loadAll() {
 async function init() {
   log('=== App init ===');
 
+  renderPinnedCityBadge();
   await loadAll();
 
   // Preset buttons
