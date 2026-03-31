@@ -196,7 +196,7 @@ function renderHourChart(buckets, weekBuckets, totalDays) {
       },
       scales: {
         x: { grid: { color: "rgba(37,45,61,0.5)" }, ticks: { color: "#475569", font: { size: 11 } } },
-        y: { grid: { color: "rgba(37,45,61,0.5)" }, ticks: { color: "#475569", precision: 0 }, beginAtZero: true }
+        y: { grid: { color: "rgba(37,45,61,0.5)" }, ticks: { color: "#475569", callback: v => v >= 10 ? v.toLocaleString("he-IL") : v % 1 === 0 ? v : v.toFixed(1) }, beginAtZero: true, title: { display: true, text: "ממוצע התרעות / יום", color: "#475569", font: { size: 11 } } }
       }
     }
   });
